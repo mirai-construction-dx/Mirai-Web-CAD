@@ -51,6 +51,16 @@ test("ZOOM EXTENTS fits a 60,000mm drawing inside the margins with an undistorte
     return differs;
   }, bottomRight);
   expect(painted).toBeGreaterThan(0);
+  // 縮尺表示はfit確定後のカメラと一致する(render時の暫定縮尺が残らない)。
+  const camera = fitCameraToBounds(drawing.entities.map(entityBounds), size);
+  const expected = `${Math.round(camera.scale * 1000)}%`;
+  await expect(page.locator(".zoom-readout")).toHaveText(expected);
+  await expect(page.locator("#scaleReadout")).toHaveText(`縮尺 ${expected}`);
+  // ホイールズームはrenderを経由しないが、縮尺表示は追従する。
+  const box = await page.locator("#cadCanvas").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 100);
+  await expect(page.locator(".zoom-readout")).toHaveText(`${Math.round(camera.scale * 0.9 * 1000)}%`);
   await testInfo.attach("zoom-extents", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 });
 

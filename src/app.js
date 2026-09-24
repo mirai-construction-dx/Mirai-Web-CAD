@@ -437,7 +437,7 @@ function render() {
           <button type="button" data-space="model" class="space-tab ${state.space === "model" ? "active" : ""}" aria-pressed="${state.space === "model"}">モデル</button>
           <button type="button" data-space="layout" class="space-tab ${state.space === "layout" ? "active" : ""}" aria-pressed="${state.space === "layout"}">レイアウト1</button>
           <div class="spacer"></div>
-          <span class="zoom-readout">${Math.round(state.camera.scale * 1000)}%</span>
+          <span class="zoom-readout">${zoomReadoutText()}</span>
           <button id="fitBtn" type="button" title="図面範囲表示" aria-label="図面範囲表示">全体表示</button>
         </div>
         ${state.space === "layout" ? layoutSpaceHtml(activeLayoutDrawing(drawing)) : modelSpaceHtml(drawing)}
@@ -661,7 +661,7 @@ function statusBarHtml(drawing) {
         ).join("")}
       </div>
       <div class="spacer"></div>
-      <span>縮尺 ${state.space === "layout" ? `1:${escapeHtml(String(drawing.layout?.scale ?? 100))}` : `${Math.round(state.camera.scale * 1000)}%`}</span>
+      <span id="scaleReadout">縮尺 ${state.space === "layout" ? `1:${escapeHtml(String(drawing.layout?.scale ?? 100))}` : zoomReadoutText()}</span>
       <div class="divider"></div>
       <span>単位 ${escapeHtml(drawing.unit)}</span>
       <div class="divider"></div>
@@ -1559,6 +1559,19 @@ function fitToDrawing() {
   render();
 }
 
+function zoomReadoutText() {
+  return `${Math.round(state.camera.scale * 1000)}%`;
+}
+
+// render()はfit確定前に縮尺を書き出し、ホイールズームはrenderを経由しないため、描画ごとに表示を最新のカメラへ合わせる。
+function updateZoomReadouts() {
+  const text = zoomReadoutText();
+  const readout = document.querySelector(".zoom-readout");
+  if (readout) readout.textContent = text;
+  const scale = document.querySelector("#scaleReadout");
+  if (scale && state.space !== "layout") scale.textContent = `縮尺 ${text}`;
+}
+
 function fitCameraToDrawing() {
   const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
   if (canvas) syncCanvasBackingSize(canvas);
@@ -1821,7 +1834,7 @@ function zoomAtCenter(factor) {
   const after = screenToWorld(canvas.width / 2, canvas.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
-  log(`ズーム: ${Math.round(state.camera.scale * 1000)}%`);
+  log(`ズーム: ${zoomReadoutText()}`);
   render();
 }
 
@@ -2421,6 +2434,7 @@ function drawCanvas(pointerWorld = null) {
     state.fitPending = false;
     state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas);
   }
+  updateZoomReadouts();
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid(ctx, canvas);
