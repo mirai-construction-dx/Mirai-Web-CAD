@@ -17,6 +17,8 @@ test("drawing replaced by the API after startup is fitted when it does not fit t
   await page.route("**/api/ai/status", (route) => route.fulfill(json({ enabled: false })));
   await page.goto("/");
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-mvp")).entities.length)).toBe(2);
+  // checkApiHealth()の最終render(AI状態取得後)を待つ。localStorage保存はその前に完了する。
+  await expect(page.locator(".save-status")).toHaveText("サーバー同期済み");
   const size = await page.locator("#cadCanvas").evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }));
   const camera = fitCameraToBounds(large.entities.map(entityBounds), size);
   const bottomRight = { x: camera.x + 60000 * camera.scale, y: camera.y + 40000 * camera.scale };
