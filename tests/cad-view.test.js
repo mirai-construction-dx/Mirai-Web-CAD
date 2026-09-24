@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, syncCanvasBackingSize } from "../src/cad-view.js";
+import { boundsVisibleInView, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
 
 const toScreen = (camera, x, y) => ({ x: camera.x + x * camera.scale, y: camera.y + y * camera.scale });
 
@@ -25,14 +25,16 @@ test("ZOOM EXTENTS uses the actual canvas size for desktop and mobile viewports"
   for (const viewport of [{ width: 1600, height: 900 }, { width: 393, height: 360 }]) {
     const camera = fitCameraToBounds([bounds], viewport);
     assertInsideMargins(camera, bounds, viewport);
+    const center = toScreen(camera, 10000, 6000);
+    assert.ok(Math.abs(center.x - viewport.width / 2) < 1e-9 && Math.abs(center.y - viewport.height / 2) < 1e-9);
     const limiting = Math.min((viewport.width - FIT_MARGIN * 2) / 20000, (viewport.height - FIT_MARGIN * 2) / 12000);
     assert.equal(camera.scale, limiting);
   }
 });
 
-test("ZOOM EXTENTS merges every entity bound and keeps small drawings at the fit cap", () => {
+test("ZOOM EXTENTS merges every entity bound, centers it and keeps small drawings at the fit cap", () => {
   const camera = fitCameraToBounds([{ minX: 400, minY: 400, maxX: 1600, maxY: 400 }, { minX: 400, minY: 1000, maxX: 1600, maxY: 1000 }], { width: 1180, height: 760 });
-  assert.deepEqual(camera, { x: FIT_MARGIN - 400 * FIT_MAX_SCALE, y: FIT_MARGIN - 400 * FIT_MAX_SCALE, scale: FIT_MAX_SCALE });
+  assert.deepEqual(camera, { x: 590 - 1000 * FIT_MAX_SCALE, y: 380 - 700 * FIT_MAX_SCALE, scale: FIT_MAX_SCALE });
   assert.deepEqual(fitCameraToBounds([], { width: 1180, height: 760 }), { x: 45, y: 45, scale: 0.08 });
 });
 
@@ -55,6 +57,11 @@ test("canvas backing store follows the CSS size so circles are not stretched", (
   assert.equal(syncCanvasBackingSize(canvas), true);
   assert.deepEqual([canvas.width, canvas.height], [1203, 512]);
   assert.equal(syncCanvasBackingSize(canvas), false);
+  const retina = { width: 1180, height: 760, clientWidth: 393, clientHeight: 360 };
+  assert.equal(syncCanvasBackingSize(retina, 2.625), true);
+  assert.deepEqual([retina.width, retina.height], [1032, 945]);
+  assert.deepEqual(canvasViewSize(retina), { width: 393, height: 360 });
+  assert.equal(syncCanvasBackingSize({ width: 1, height: 1, clientWidth: 10, clientHeight: 10 }, Number.NaN), true);
   const hidden = { width: 1180, height: 760, clientWidth: 0, clientHeight: 0 };
   assert.equal(syncCanvasBackingSize(hidden), false);
   assert.deepEqual([hidden.width, hidden.height], [1180, 760]);
@@ -67,4 +74,22 @@ test("display grid coarsens by powers of ten instead of drawing tens of thousand
   assert.ok(tiny >= MIN_GRID_STEP_PX && tiny < MIN_GRID_STEP_PX * 10, String(tiny));
   assert.equal(displayGridStep(0), null);
   assert.equal(displayGridStep(Number.NaN), null);
+});
+
+test("startup fits only drawings that do not fit the default view", () => {
+  const camera = { x: 50, y: 40, scale: 0.075 };
+  const viewport = { width: 1000, height: 600 };
+  assert.equal(boundsVisibleInView([{ minX: 400, minY: 400, maxX: 1600, maxY: 1000 }], camera, viewport), true);
+  assert.equal(boundsVisibleInView([{ minX: 0, minY: 0, maxX: 60000, maxY: 40000 }], camera, viewport), false);
+  assert.equal(boundsVisibleInView([{ minX: -1000, minY: 0, maxX: 10, maxY: 10 }], camera, viewport), false);
+  assert.equal(boundsVisibleInView([], camera, viewport), true);
+});
+
+test("zoom readout keeps significant digits below 1% instead of rounding to 0%", () => {
+  assert.equal(formatZoomPercent(0.075), "75%");
+  assert.equal(formatZoomPercent(0.0157), "16%");
+  assert.equal(formatZoomPercent(0.00157), "1.6%");
+  assert.equal(formatZoomPercent(0.0001), "0.1%");
+  assert.equal(formatZoomPercent(0.0000123), "0.012%");
+  assert.equal(formatZoomPercent(0), "0%");
 });
