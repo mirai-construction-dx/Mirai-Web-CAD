@@ -27,6 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
+import { clampCameraScale, DEFAULT_CANVAS_SIZE, fitCameraToBounds, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -319,6 +320,7 @@ const state = {
   aiError: null,
   aiEngine: null,
   camera: { x: 50, y: 40, scale: 0.075 },
+  fitPending: false,
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1558,19 +1560,11 @@ function fitToDrawing() {
 }
 
 function fitCameraToDrawing() {
-  const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
-  if (bounds.length === 0) {
-    state.camera = { x: 45, y: 45, scale: 0.08 };
-    return;
-  }
-  const minX = Math.min(...bounds.map((value) => value.minX));
-  const minY = Math.min(...bounds.map((value) => value.minY));
-  const maxX = Math.max(...bounds.map((value) => value.maxX));
-  const maxY = Math.max(...bounds.map((value) => value.maxY));
-  const width = Math.max(maxX - minX, 100);
-  const height = Math.max(maxY - minY, 100);
-  const scale = Math.min(0.5, Math.max(0.025, Math.min(1080 / width, 660 / height)));
-  state.camera = { x: 50 - minX * scale, y: 50 - minY * scale, scale };
+  const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
+  if (canvas) syncCanvasBackingSize(canvas);
+  state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas ?? DEFAULT_CANVAS_SIZE);
+  // 直後のrenderでCanvasが再生成され寸法が変わり得るため、次の描画で実寸に合わせて再計算する。
+  state.fitPending = true;
 }
 
 function resetAuthoringState() {
@@ -1823,7 +1817,7 @@ function zoomAtCenter(factor) {
   const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
   const before = screenToWorld(canvas.width / 2, canvas.height / 2);
-  state.camera.scale = Math.min(2, Math.max(0.005, state.camera.scale * factor));
+  state.camera.scale = clampCameraScale(state.camera.scale * factor);
   const after = screenToWorld(canvas.width / 2, canvas.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
@@ -2095,7 +2089,7 @@ function onWheel(event) {
   event.preventDefault();
   const factor = event.deltaY < 0 ? 1.12 : 0.9;
   const before = screenToWorld(event.offsetX, event.offsetY);
-  state.camera.scale = Math.min(2, Math.max(0.005, state.camera.scale * factor));
+  state.camera.scale = clampCameraScale(state.camera.scale * factor);
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
@@ -2422,6 +2416,11 @@ function drawCanvas(pointerWorld = null) {
   const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
   const drawing = activeDrawing();
+  syncCanvasBackingSize(canvas);
+  if (state.fitPending) {
+    state.fitPending = false;
+    state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas);
+  }
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid(ctx, canvas);
@@ -3091,5 +3090,7 @@ try {
   // LocalStorageが利用できない環境では何もしない。
 }
 applyTheme(state.settings.theme);
+// 表示寸法の変化でbacking storeを追従させる(カメラは維持)。
+window.addEventListener("resize", () => drawCanvas());
 render();
 checkApiHealth();

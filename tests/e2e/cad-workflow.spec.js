@@ -398,8 +398,12 @@ test("直交モードは水平・垂直に拘束し、OSnapは既存図形の頂
 
   await page.getByRole("button", { name: "線", exact: true }).click();
   const canvas = page.getByLabel("作図キャンバス");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("cadCanvas bounding box is null");
   await canvas.click({ position: { x: 80, y: 80 } });
-  await canvas.click({ position: { x: 220, y: 140 } });
+  // 2点目は図形から離れた斜め方向へ置き、OSnap吸着ではなく直交拘束で水平になることを確かめる。
+  // 固定座標だと実寸Canvas(Issue #78)の縮尺次第で既存頂点へ吸着し、直交検証にならない。
+  await canvas.click({ position: { x: box.width - 20, y: 30 } });
   const orthoLine = await page.evaluate(() => {
     const d = JSON.parse(localStorage.getItem("mirai-web-cad-mvp"));
     return d.entities[d.entities.length - 1].points;
