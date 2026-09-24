@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, clampCameraScale, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, syncCanvasBackingSize } from "../src/cad-view.js";
+import { CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, syncCanvasBackingSize } from "../src/cad-view.js";
 
 const toScreen = (camera, x, y) => ({ x: camera.x + x * camera.scale, y: camera.y + y * camera.scale });
 
@@ -58,4 +58,13 @@ test("canvas backing store follows the CSS size so circles are not stretched", (
   const hidden = { width: 1180, height: 760, clientWidth: 0, clientHeight: 0 };
   assert.equal(syncCanvasBackingSize(hidden), false);
   assert.deepEqual([hidden.width, hidden.height], [1180, 760]);
+});
+
+test("display grid coarsens by powers of ten instead of drawing tens of thousands of lines", () => {
+  assert.equal(displayGridStep(25), 25);
+  assert.equal(displayGridStep(2.1), 21);
+  const tiny = displayGridStep(250 * CAMERA_MIN_SCALE);
+  assert.ok(tiny >= MIN_GRID_STEP_PX && tiny < MIN_GRID_STEP_PX * 10, String(tiny));
+  assert.equal(displayGridStep(0), null);
+  assert.equal(displayGridStep(Number.NaN), null);
 });

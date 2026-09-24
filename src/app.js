@@ -27,7 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
-import { clampCameraScale, DEFAULT_CANVAS_SIZE, fitCameraToBounds, syncCanvasBackingSize } from "./cad-view.js";
+import { clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -2501,13 +2501,13 @@ function drawGrid(ctx, canvas) {
   ctx.save();
   ctx.fillStyle = "#f8fbfd";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!state.settings.showGrid) {
+  const step = displayGridStep(state.settings.gridInterval * state.camera.scale);
+  if (!state.settings.showGrid || step === null) {
     ctx.restore();
     return;
   }
   ctx.strokeStyle = "#e4edf3";
   ctx.lineWidth = 1;
-  const step = state.settings.gridInterval * state.camera.scale;
   for (let x = state.camera.x % step; x < canvas.width; x += step) {
     ctx.beginPath();
     ctx.moveTo(x, 0);

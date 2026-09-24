@@ -7,6 +7,8 @@ export const CAMERA_MAX_SCALE = 2;
 export const FIT_MAX_SCALE = 0.5;
 /** ZOOM EXTENTSで図面境界の外側に確保する余白(画面px)。 */
 export const FIT_MARGIN = 50;
+/** 表示格子の最小間隔(画面px)。これより密な縮尺では格子間隔を10倍ずつ粗くする。 */
+export const MIN_GRID_STEP_PX = 4;
 /** Canvasの実寸が得られない場合(未配置・非表示)の既定backing store寸法。 */
 export const DEFAULT_CANVAS_SIZE = Object.freeze({ width: 1180, height: 760 });
 
@@ -48,4 +50,17 @@ export function syncCanvasBackingSize(canvas) {
   canvas.width = width;
   canvas.height = height;
   return true;
+}
+
+/**
+ * 表示用の格子間隔(画面px)を返す。縮小表示で格子が密になりすぎる場合は間隔を10倍ずつ広げ、
+ * 1フレームで数万本の格子線を描かないようにする(適応格子)。スナップ間隔は変えない。
+ * @param {number} stepPx 設定上の格子間隔を画面pxへ換算した値
+ * @returns {number | null} 描画できない値の場合null
+ */
+export function displayGridStep(stepPx) {
+  if (!Number.isFinite(stepPx) || stepPx <= 0) return null;
+  let step = stepPx;
+  while (step < MIN_GRID_STEP_PX) step *= 10;
+  return step;
 }
