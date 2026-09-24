@@ -3,7 +3,7 @@
 ![MVP](https://img.shields.io/badge/Status-MVP-F59E0B?style=for-the-badge)
 ![Cloudflare Access](https://img.shields.io/badge/Cloudflare-Access-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Database-Local_PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white)
-![E2E](https://img.shields.io/badge/E2E-84%2F84_Passed-16A34A?style=for-the-badge&logo=playwright&logoColor=white)
+![E2E](https://img.shields.io/badge/E2E-86%2F86_Passed-16A34A?style=for-the-badge&logo=playwright&logoColor=white)
 
 建設・土木の図面を、Webブラウザで作成・修正・確認するための**試作版2D CAD**です。専用ソフトのインストールは不要です。
 

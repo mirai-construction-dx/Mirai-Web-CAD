@@ -41,8 +41,10 @@ test("ZOOM EXTENTS merges every entity bound, centers it and keeps small drawing
 test("ZOOM EXTENTS stays finite for a viewport smaller than the margins and for huge extents", () => {
   const tiny = fitCameraToBounds([{ minX: 0, minY: 0, maxX: 1000, maxY: 1000 }], { width: 60, height: 40 });
   assert.ok(Number.isFinite(tiny.scale) && tiny.scale >= CAMERA_MIN_SCALE);
-  const huge = fitCameraToBounds([{ minX: 0, minY: 0, maxX: 1e9, maxY: 1e9 }], { width: 1180, height: 760 });
-  assert.equal(huge.scale, CAMERA_MIN_SCALE);
+  const hugeBounds = { minX: 0, minY: 0, maxX: 1e9, maxY: 1e9 };
+  const huge = fitCameraToBounds([hugeBounds], { width: 1180, height: 760 });
+  assert.ok(huge.scale > 0 && huge.scale < CAMERA_MIN_SCALE, String(huge.scale));
+  assertInsideMargins(huge, hugeBounds, { width: 1180, height: 760 });
 });
 
 test("camera scale clamp is shared by wheel, zoom buttons and fit", () => {
@@ -50,6 +52,9 @@ test("camera scale clamp is shared by wheel, zoom buttons and fit", () => {
   assert.equal(clampCameraScale(0), CAMERA_MIN_SCALE);
   assert.equal(clampCameraScale(Number.NaN), CAMERA_MIN_SCALE);
   assert.equal(clampCameraScale(0.3), 0.3);
+  // ZOOM EXTENTSで下限未満になった後の拡大は、下限へ跳ばず現在の縮尺から続く。
+  assert.equal(clampCameraScale(0.00001 * 1.12, 0.00001), 0.00001 * 1.12);
+  assert.equal(clampCameraScale(0.00001 * 0.9, 0.00001), 0.00001);
 });
 
 test("canvas backing store follows the CSS size so circles are not stretched", () => {

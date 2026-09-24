@@ -321,8 +321,8 @@ const state = {
   aiEngine: null,
   camera: { x: 50, y: 40, scale: 0.075 },
   fitPending: false,
-  // 起動直後の初回描画で、既定表示に収まらない図面だけをZOOM EXTENTSする。
-  startupFitCheck: true,
+  // 起動直後やAPIからの図面差替え後の描画で、表示に収まらない図面だけをZOOM EXTENTSする。
+  outOfViewFitPending: true,
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1833,7 +1833,7 @@ function zoomAtCenter(factor) {
   if (!canvas) return;
   const view = canvasViewSize(canvas);
   const before = screenToWorld(view.width / 2, view.height / 2);
-  state.camera.scale = clampCameraScale(state.camera.scale * factor);
+  state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(view.width / 2, view.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
@@ -2105,7 +2105,7 @@ function onWheel(event) {
   event.preventDefault();
   const factor = event.deltaY < 0 ? 1.12 : 0.9;
   const before = screenToWorld(event.offsetX, event.offsetY);
-  state.camera.scale = clampCameraScale(state.camera.scale * factor);
+  state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
@@ -2434,11 +2434,11 @@ function drawCanvas(pointerWorld = null) {
   const drawing = activeDrawing();
   syncCanvasBackingSize(canvas, window.devicePixelRatio);
   const view = canvasViewSize(canvas);
-  if (state.fitPending || state.startupFitCheck) {
+  if (state.fitPending || state.outOfViewFitPending) {
     const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
     if (state.fitPending || !boundsVisibleInView(bounds, state.camera, view)) state.camera = fitCameraToBounds(bounds, view);
     state.fitPending = false;
-    state.startupFitCheck = false;
+    state.outOfViewFitPending = false;
   }
   updateZoomReadouts();
   const ctx = canvas.getContext("2d");
@@ -2790,6 +2790,7 @@ async function checkApiHealth() {
     const selectedRole = roleLocked ? body.auth.role : state.drawing.currentRole;
     if (drawingBody.drawing.id !== state.drawing.id) state.layoutDraft = null;
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
+    state.outOfViewFitPending = true;
     state.saveStatus = saveDrawing(state.drawing).ok ? "synced" : "failed";
     state.apiStatus = {
       state: "ok",

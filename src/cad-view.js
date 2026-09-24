@@ -1,6 +1,6 @@
 // 表示カメラとCanvas寸法の純粋な計算。DOM状態は引数で受け取り、app.jsから利用する。
 
-/** ホイール・ボタン・ZOOM EXTENTSで共通のカメラ縮尺範囲(画面px/図面単位)。 */
+/** ホイール・ボタン操作のカメラ縮尺範囲(画面px/図面単位)。ZOOM EXTENTSは下限に縛られない。 */
 export const CAMERA_MIN_SCALE = 0.0001;
 export const CAMERA_MAX_SCALE = 2;
 /** 小さな図面をZOOM EXTENTSで過大表示しない上限。 */
@@ -12,9 +12,16 @@ export const MIN_GRID_STEP_PX = 4;
 /** Canvasの実寸が得られない場合(未配置・非表示)の既定backing store寸法。 */
 export const DEFAULT_CANVAS_SIZE = Object.freeze({ width: 1180, height: 760 });
 
-export function clampCameraScale(scale) {
-  if (!Number.isFinite(scale)) return CAMERA_MIN_SCALE;
-  return Math.min(CAMERA_MAX_SCALE, Math.max(CAMERA_MIN_SCALE, scale));
+/**
+ * ホイール・ボタン操作後の縮尺を範囲内へ丸める。ZOOM EXTENTSで下限未満になっている場合は、
+ * 拡大操作で下限へ跳ばないよう現在の縮尺を下限として扱う。
+ * @param {number} scale
+ * @param {number} [current] 操作前の縮尺
+ */
+export function clampCameraScale(scale, current = CAMERA_MIN_SCALE) {
+  const floor = Number.isFinite(current) && current > 0 ? Math.min(CAMERA_MIN_SCALE, current) : CAMERA_MIN_SCALE;
+  if (!Number.isFinite(scale)) return floor;
+  return Math.min(CAMERA_MAX_SCALE, Math.max(floor, scale));
 }
 
 /**
@@ -32,7 +39,8 @@ export function fitCameraToBounds(bounds, viewport) {
   const height = Math.max(maxY - minY, 100);
   const availableWidth = Math.max(viewport.width - FIT_MARGIN * 2, 1);
   const availableHeight = Math.max(viewport.height - FIT_MARGIN * 2, 1);
-  const scale = clampCameraScale(Math.min(FIT_MAX_SCALE, availableWidth / width, availableHeight / height));
+  // 操作用の縮尺下限は適用しない。超巨大図面でも余白を保って全体を収める。
+  const scale = Math.min(FIT_MAX_SCALE, availableWidth / width, availableHeight / height);
   return {
     x: viewport.width / 2 - ((minX + maxX) / 2) * scale,
     y: viewport.height / 2 - ((minY + maxY) / 2) * scale,
