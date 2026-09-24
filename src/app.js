@@ -27,7 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
-import { clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, syncCanvasBackingSize } from "./cad-view.js";
+import { boundsVisibleInView, canvasViewSize, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -321,6 +321,8 @@ const state = {
   aiEngine: null,
   camera: { x: 50, y: 40, scale: 0.075 },
   fitPending: false,
+  // 起動直後やAPIからの図面差替え後の描画で、表示に収まらない図面だけをZOOM EXTENTSする。
+  outOfViewFitPending: true,
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1560,7 +1562,7 @@ function fitToDrawing() {
 }
 
 function zoomReadoutText() {
-  return `${Math.round(state.camera.scale * 1000)}%`;
+  return formatZoomPercent(state.camera.scale);
 }
 
 // render()はfit確定前に縮尺を書き出し、ホイールズームはrenderを経由しないため、描画ごとに表示を最新のカメラへ合わせる。
@@ -1574,8 +1576,8 @@ function updateZoomReadouts() {
 
 function fitCameraToDrawing() {
   const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
-  if (canvas) syncCanvasBackingSize(canvas);
-  state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas ?? DEFAULT_CANVAS_SIZE);
+  if (canvas) syncCanvasBackingSize(canvas, window.devicePixelRatio);
+  state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas ? canvasViewSize(canvas) : DEFAULT_CANVAS_SIZE);
   // 直後のrenderでCanvasが再生成され寸法が変わり得るため、次の描画で実寸に合わせて再計算する。
   state.fitPending = true;
 }
@@ -1829,9 +1831,10 @@ function printDrawing() {
 function zoomAtCenter(factor) {
   const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
-  const before = screenToWorld(canvas.width / 2, canvas.height / 2);
-  state.camera.scale = clampCameraScale(state.camera.scale * factor);
-  const after = screenToWorld(canvas.width / 2, canvas.height / 2);
+  const view = canvasViewSize(canvas);
+  const before = screenToWorld(view.width / 2, view.height / 2);
+  state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
+  const after = screenToWorld(view.width / 2, view.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
   log(`ズーム: ${zoomReadoutText()}`);
@@ -2102,7 +2105,7 @@ function onWheel(event) {
   event.preventDefault();
   const factor = event.deltaY < 0 ? 1.12 : 0.9;
   const before = screenToWorld(event.offsetX, event.offsetY);
-  state.camera.scale = clampCameraScale(state.camera.scale * factor);
+  state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
@@ -2429,18 +2432,24 @@ function drawCanvas(pointerWorld = null) {
   const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
   const drawing = activeDrawing();
-  syncCanvasBackingSize(canvas);
-  if (state.fitPending) {
+  syncCanvasBackingSize(canvas, window.devicePixelRatio);
+  const view = canvasViewSize(canvas);
+  if (state.fitPending || state.outOfViewFitPending) {
+    const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
+    if (state.fitPending || !boundsVisibleInView(bounds, state.camera, view)) state.camera = fitCameraToBounds(bounds, view);
     state.fitPending = false;
-    state.camera = fitCameraToBounds(state.drawing.entities.map(entityBounds).filter(Boolean), canvas);
+    state.outOfViewFitPending = false;
   }
   updateZoomReadouts();
   const ctx = canvas.getContext("2d");
+  // 以降の描画はCSS px座標で行い、backing storeの高DPI倍率はtransformで吸収する。
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawGrid(ctx, canvas);
+  ctx.setTransform(canvas.width / view.width, 0, 0, canvas.height / view.height, 0, 0);
+  drawGrid(ctx, view);
   drawPaper(ctx);
 
-  const viewport = worldViewportBounds(canvas);
+  const viewport = worldViewportBounds(view);
   const selection = new Set(state.selectedIds);
   const previews = new Map((state.drag?.preview ?? []).map((entity) => [entity.id, entity]));
   for (const entity of visibleEntities(drawing.entities, viewport)) {
@@ -2507,14 +2516,14 @@ function drawCanvas(pointerWorld = null) {
   }
 
   if (state.viewMode === "loading" || state.viewMode === "error" || state.viewMode === "empty") {
-    drawStateOverlay(ctx, canvas, state.viewMode);
+    drawStateOverlay(ctx, view, state.viewMode);
   }
 }
 
-function drawGrid(ctx, canvas) {
+function drawGrid(ctx, view) {
   ctx.save();
   ctx.fillStyle = "#f8fbfd";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, view.width, view.height);
   const step = displayGridStep(state.settings.gridInterval * state.camera.scale);
   if (!state.settings.showGrid || step === null) {
     ctx.restore();
@@ -2522,16 +2531,16 @@ function drawGrid(ctx, canvas) {
   }
   ctx.strokeStyle = "#e4edf3";
   ctx.lineWidth = 1;
-  for (let x = state.camera.x % step; x < canvas.width; x += step) {
+  for (let x = state.camera.x % step; x < view.width; x += step) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
+    ctx.lineTo(x, view.height);
     ctx.stroke();
   }
-  for (let y = state.camera.y % step; y < canvas.height; y += step) {
+  for (let y = state.camera.y % step; y < view.height; y += step) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
+    ctx.lineTo(view.width, y);
     ctx.stroke();
   }
   ctx.restore();
@@ -2710,9 +2719,9 @@ function screenToWorld(x, y) {
   };
 }
 
-function worldViewportBounds(canvas) {
+function worldViewportBounds(view) {
   const topLeft = screenToWorld(0, 0);
-  const bottomRight = screenToWorld(canvas.width, canvas.height);
+  const bottomRight = screenToWorld(view.width, view.height);
   return {
     minX: Math.min(topLeft.x, bottomRight.x),
     minY: Math.min(topLeft.y, bottomRight.y),
@@ -2781,6 +2790,7 @@ async function checkApiHealth() {
     const selectedRole = roleLocked ? body.auth.role : state.drawing.currentRole;
     if (drawingBody.drawing.id !== state.drawing.id) state.layoutDraft = null;
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
+    state.outOfViewFitPending = true;
     state.saveStatus = saveDrawing(state.drawing).ok ? "synced" : "failed";
     state.apiStatus = {
       state: "ok",
@@ -2918,7 +2928,7 @@ function viewModeLabel(mode) {
   }[mode] ?? mode;
 }
 
-function drawStateOverlay(ctx, canvas, mode) {
+function drawStateOverlay(ctx, view, mode) {
   const labels = {
     empty: ["空の図面", "新規作成直後の状態です"],
     loading: ["Loading", "図面データを取得しています"],
@@ -2927,14 +2937,14 @@ function drawStateOverlay(ctx, canvas, mode) {
   const [title, subtitle] = labels[mode] ?? labels.empty;
   ctx.save();
   ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, view.width, view.height);
   ctx.fillStyle = mode === "error" ? "#be3c3c" : "#10253c";
   ctx.textAlign = "center";
   ctx.font = "700 28px sans-serif";
-  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 12);
+  ctx.fillText(title, view.width / 2, view.height / 2 - 12);
   ctx.fillStyle = "#5f7182";
   ctx.font = "16px sans-serif";
-  ctx.fillText(subtitle, canvas.width / 2, canvas.height / 2 + 22);
+  ctx.fillText(subtitle, view.width / 2, view.height / 2 + 22);
   ctx.restore();
 }
 
