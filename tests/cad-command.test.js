@@ -165,3 +165,45 @@ test("command line supports chamfer, fillet, boundary, and polyline vertex editi
   assert.equal(parseCadCommand(`PEDIT ${boundaryId} OPEN`, context({ drawing: boundaryDrawing })).commands[0].patch.closed, false);
   assert.throws(() => parseCadCommand(`PEDIT ${boundaryId} DELETE 0`, context({ drawing: boundaryDrawing })), /1以上/);
 });
+
+test("command line resolves relative and polar coordinates against the previous point", () => {
+  const lineCommand = parseCadCommand("LINE 100,100 @50,-20", context());
+  assert.deepEqual(lineCommand.commands[0].entity.points, [{ x: 100, y: 100 }, { x: 150, y: 80 }]);
+
+  const polar = parseCadCommand("LINE 100<90 @100<180", context());
+  assert.deepEqual(polar.commands[0].entity.points, [{ x: 0, y: 100 }, { x: -100, y: 100 }]);
+
+  const rectangle = parseCadCommand("RECT 10,20 @300,-200", context()).commands[0].entity;
+  assert.deepEqual([rectangle.origin, rectangle.width, rectangle.height], [{ x: 10, y: -180 }, 300, 200]);
+
+  const pline = parseCadCommand("PLINE 0,0 @1000,0 @0,500 @1000<180 CLOSE", context()).commands[0].entity;
+  assert.deepEqual(pline.points, [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 500 }, { x: 0, y: 500 }]);
+  assert.equal(pline.closed, true);
+
+  const dimension = parseCadCommand("DIM 0,0 @300<0 200", context()).commands[0].entity;
+  assert.deepEqual(dimension.points, [{ x: 0, y: 0 }, { x: 300, y: 0 }]);
+  assert.match(parseCadCommand("DIST 0,0 @30,40", context()).message, /距離=50 /);
+
+  const applied = applyTransaction(seedDrawing(), { source: "user", label: polar.label, commands: polar.commands });
+  assert.equal(applied.ok, true);
+});
+
+test("command line accepts polar coordinates as point arguments and rejects ambiguous relative input", () => {
+  const drawing = seedDrawing();
+  const selectedId = drawing.entities.find((entity) => entity.type === "rect").id;
+  const mirror = parseCadCommand("MIRROR 0,0 @100<90", context({ drawing, selectedId }));
+  assert.equal(mirror.label, "MIRROR");
+  const circleCommand = parseCadCommand("CIRCLE 200<45 10", context()).commands[0].entity;
+  assert.ok(Math.abs(circleCommand.center.x - 141.421356237) < 1e-6);
+  assert.equal(circleCommand.center.x, circleCommand.center.y);
+
+  assert.throws(() => parseCadCommand("LINE @10,0 20,0", context()), /先頭の点/);
+  assert.throws(() => parseCadCommand("CIRCLE @10,0 5", context()), /相対座標/);
+  assert.throws(() => parseCadCommand(`MOVE ${selectedId} @10,0`, context({ drawing })), /相対座標/);
+  assert.throws(() => parseCadCommand("LINE 0,0 @10<", context()), /angleが空/);
+  assert.throws(() => parseCadCommand("LINE 0,0 10<20<30", context()), /距離<角度/);
+  assert.throws(() => parseCadCommand("LINE 0,0 @abc<30", context()), /distanceが数値ではありません/);
+  // 極座標の移動量はIDと誤認せず座標として扱う
+  const moved = parseCadCommand("MOVE 100<0", context({ drawing, selectedId }));
+  assert.deepEqual(moved.commands[0].id, selectedId);
+});

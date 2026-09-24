@@ -50,12 +50,12 @@ export function parseCadCommand(input, context) {
   if (tool && tokens.length === 0) return { kind: "ui", action: "tool", tool };
   if (tool === "line") {
     requireCount(tokens, 2, "LINE x1,y1 x2,y2");
-    return transaction("LINE", [{ op: "add", entity: line(context.currentLayerId, point(tokens[0]), point(tokens[1])) }]);
+    const [start, end] = pointSequence(tokens);
+    return transaction("LINE", [{ op: "add", entity: line(context.currentLayerId, start, end) }]);
   }
   if (tool === "rect") {
     requireCount(tokens, 2, "RECT x1,y1 x2,y2");
-    const origin = point(tokens[0]);
-    const opposite = point(tokens[1]);
+    const [origin, opposite] = pointSequence(tokens);
     return transaction("RECT", [
       {
         op: "add",
@@ -98,14 +98,14 @@ export function parseCadCommand(input, context) {
   }
   if (tool === "spline") {
     if (tokens.length < 2) throw new Error("SPLINEには2点以上の制御点が必要です。");
-    return transaction("SPLINE", [{ op: "add", entity: spline(context.currentLayerId, tokens.map(point)) }]);
+    return transaction("SPLINE", [{ op: "add", entity: spline(context.currentLayerId, pointSequence(tokens)) }]);
   }
   if (tool === "polyline") {
     const closed = tokens.at(-1)?.toUpperCase() === "CLOSE";
     if (closed) tokens.pop();
     if (tokens.length < 2) throw new Error("PLINEには2点以上が必要です。");
     return transaction("PLINE", [
-      { op: "add", entity: polyline(context.currentLayerId, tokens.map(point), { closed }) }
+      { op: "add", entity: polyline(context.currentLayerId, pointSequence(tokens), { closed }) }
     ]);
   }
   if (tool === "text") {
@@ -149,7 +149,7 @@ export function parseCadCommand(input, context) {
   }
   if (command === "STRETCH") {
     if (tokens.length < 3) throw new Error("STRETCH x1,y1 x2,y2 dx,dy [id ...]");
-    const a = point(tokens.shift()), b = point(tokens.shift()), delta = point(tokens.shift());
+    const [a, b] = pointSequence(tokens.splice(0, 2)), delta = point(tokens.shift());
     return transaction("STRETCH", selectedEntities(tokens, context).map((entity) => ({
       op: "update", id: entity.id, patch: withoutIdentity(stretchEntity(entity, a, b, delta))
     })));
@@ -171,7 +171,8 @@ export function parseCadCommand(input, context) {
   if (["PE", "PEDIT"].includes(command)) return polylineEditCommand(tokens, context);
   if (["D", "DIM", "DIMLINEAR", "DIMALIGNED"].includes(command)) {
     if (tokens.length < 2 || tokens.length > 3) throw new Error("形式: DIM x1,y1 x2,y2 [offset]");
-    return transaction("DIM", [{ op: "add", entity: dimensionEntity(context.currentLayerId, point(tokens[0]), point(tokens[1]), { dimensionType: command === "DIMLINEAR" ? "horizontal" : "aligned", offset: tokens[2] === undefined ? 350 : number(tokens[2], "offset") }) }]);
+    const [start, end] = pointSequence(tokens.slice(0, 2));
+    return transaction("DIM", [{ op: "add", entity: dimensionEntity(context.currentLayerId, start, end, { dimensionType: command === "DIMLINEAR" ? "horizontal" : "aligned", offset: tokens[2] === undefined ? 350 : number(tokens[2], "offset") }) }]);
   }
   if (["DIMASSOC", "DIMHORIZONTAL", "DIMVERTICAL", "DIMRADIUS", "DIMDIAMETER"].includes(command)) {
     const entity = context.drawing.entities.find((item) => item.id === (tokens[0] ?? context.selectedId));
@@ -192,7 +193,7 @@ export function parseCadCommand(input, context) {
   }
   if (["DI", "DIST"].includes(command)) {
     requireCount(tokens, 2, "DIST x1,y1 x2,y2");
-    const result = measurePoints(point(tokens[0]), point(tokens[1]));
+    const result = measurePoints(...pointSequence(tokens));
     return { kind: "message", message: `距離=${format(result.distance)} ΔX=${format(result.dx)} ΔY=${format(result.dy)} 角度=${format(result.angle)}°` };
   }
   if (["AREA", "AA"].includes(command)) {
@@ -206,7 +207,7 @@ export function parseCadCommand(input, context) {
   }
   if (["H", "HATCH"].includes(command)) {
     if (tokens.length < 3) throw new Error("HATCHには3点以上の境界座標が必要です。");
-    return transaction("HATCH", [{ op: "add", entity: hatchEntity(context.currentLayerId, tokens.map(point)) }]);
+    return transaction("HATCH", [{ op: "add", entity: hatchEntity(context.currentLayerId, pointSequence(tokens)) }]);
   }
   if (["B", "BLOCK"].includes(command)) {
     if (!tokens[0]) throw new Error("形式: BLOCK name [id]");
@@ -259,7 +260,7 @@ export function parseCadCommand(input, context) {
   }
   if (["FENCE", "LASSO"].includes(command)) {
     if (!tokens.length) return { kind: "ui", action: "tool", tool: command.toLowerCase() };
-    return { kind: "ui", action: "selectMany", entityIds: selectByPath(context.drawing, tokens.map(point), command.toLowerCase()) };
+    return { kind: "ui", action: "selectMany", entityIds: selectByPath(context.drawing, pointSequence(tokens), command.toLowerCase()) };
   }
   if (command === "SELECTSIMILAR") {
     const source = selectedEntities(tokens, context)[0];
@@ -292,7 +293,7 @@ export function parseCadCommand(input, context) {
   if (["HELP", "?"].includes(command)) {
     return {
       kind: "message",
-      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM PLOT UNDO REDO"
+      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM PLOT UNDO REDO / 座標: x,y 距離<角度 @dx,dy @距離<角度(@は2点目以降)"
     };
   }
   throw new Error(`未対応のコマンドです: ${command}`);
@@ -309,7 +310,7 @@ function selectedEntities(tokens, context) {
 }
 
 function transformCommand(label, tokens, context, copy) {
-  const ids = tokens[0] && !tokens[0].includes(",") ? [tokens.shift()] : [];
+  const ids = tokens[0] && !isCoordinate(tokens[0]) ? [tokens.shift()] : [];
   const entities = selectedEntities(ids, context);
   requireCount(tokens, 1, `${label} [id] dx,dy`);
   const offset = point(tokens[0]);
@@ -357,7 +358,7 @@ function offsetCommand(tokens, context) {
 
 function endpointCommand(label, tokens, context) {
   let id = context.selectedId;
-  if (tokens[0] && !tokens[0].includes(",")) id = tokens.shift();
+  if (tokens[0] && !isCoordinate(tokens[0])) id = tokens.shift();
   const entity = context.drawing.entities.find((item) => item.id === id);
   if (!entity) throw new Error(`${label}する線分を選択するかIDを指定してください。`);
   requireCount(tokens, 1, `${label} [id] x,y (クリック点)`);
@@ -370,12 +371,11 @@ function endpointCommand(label, tokens, context) {
 
 function mirrorCommand(tokens, context) {
   let id = context.selectedId;
-  if (tokens[0] && !tokens[0].includes(",")) id = tokens.shift();
+  if (tokens[0] && !isCoordinate(tokens[0])) id = tokens.shift();
   const entity = context.drawing.entities.find((item) => item.id === id);
   if (!entity) throw new Error("MIRRORする図形を選択するかIDを指定してください。");
   requireCount(tokens, 2, "MIRROR [id] x1,y1 x2,y2 (鏡像軸の2点)");
-  const axisStart = point(tokens[0]);
-  const axisEnd = point(tokens[1]);
+  const [axisStart, axisEnd] = pointSequence(tokens);
   const next = mirrorEntity(entity, axisStart, axisEnd);
   // rect→polyline等、型が変わる変換はdelete+addで置換する(updateでは整合しない)
   const commands =
@@ -387,7 +387,7 @@ function mirrorCommand(tokens, context) {
 
 function arrayCommand(tokens, context) {
   let id = context.selectedId;
-  if (tokens[0] && !tokens[0].includes(",") && !/^\d+$/.test(tokens[0] ?? "")) id = tokens.shift();
+  if (tokens[0] && !isCoordinate(tokens[0]) && !/^\d+$/.test(tokens[0] ?? "")) id = tokens.shift();
   const entity = context.drawing.entities.find((item) => item.id === id);
   if (!entity) throw new Error("ARRAYする図形を選択するかIDを指定してください。");
   requireCount(tokens, 4, "ARRAY [id] 列数 行数 列間隔 行間隔");
@@ -397,7 +397,7 @@ function arrayCommand(tokens, context) {
 
 function breakCommand(tokens, context) {
   let id = context.selectedId;
-  if (tokens[0] && !tokens[0].includes(",")) id = tokens.shift();
+  if (tokens[0] && !isCoordinate(tokens[0])) id = tokens.shift();
   const entity = context.drawing.entities.find((item) => item.id === id);
   if (!entity) throw new Error("BREAKする図形を選択するかIDを指定してください。");
   requireCount(tokens, 1, "BREAK [id] x,y");
@@ -546,10 +546,52 @@ function transaction(label, commands) {
   return { kind: "transaction", label, commands };
 }
 
+// 絶対座標 x,y / 絶対極座標 distance<angle。角度は度、+X軸から反時計回り(ARC/DISTと同じ規約)。
 function point(value) {
-  const parts = String(value).split(",");
-  if (parts.length !== 2) throw new Error(`座標はx,y形式で指定してください: ${value}`);
-  return { x: number(parts[0], "x"), y: number(parts[1], "y") };
+  const text = String(value);
+  if (text.startsWith("@")) throw new Error(`相対座標(@)は2点目以降の連続点入力でのみ指定できます: ${value}`);
+  return resolvePoint(text, { x: 0, y: 0 });
+}
+
+// 連続点入力。@dx,dy / @distance<angle は同じコマンド内の直前点を基準に解決する。
+// 単一行CLIには前回コマンドの最終点(AutoCADのLASTPOINT)がないため、先頭点の@は拒否する。
+function pointSequence(tokens) {
+  const points = [];
+  for (const token of tokens) {
+    const text = String(token);
+    if (!text.startsWith("@")) {
+      points.push(point(text));
+      continue;
+    }
+    const previous = points.at(-1);
+    if (!previous) throw new Error(`先頭の点に相対座標(@)は使用できません: ${text}`);
+    points.push(resolvePoint(text.slice(1), previous, true));
+  }
+  return points;
+}
+
+function resolvePoint(text, base, relative = false) {
+  if (text.includes("<")) {
+    const parts = text.split("<");
+    if (parts.length !== 2) throw new Error(`極座標は距離<角度形式で指定してください: ${text}`);
+    const distance = number(parts[0], "distance");
+    const radians = (number(parts[1], "angle") * Math.PI) / 180;
+    return { x: roundCoordinate(base.x + distance * Math.cos(radians)), y: roundCoordinate(base.y + distance * Math.sin(radians)) };
+  }
+  const parts = text.split(",");
+  if (parts.length !== 2) throw new Error(`座標はx,y、@dx,dy、距離<角度、@距離<角度のいずれかで指定してください: ${text}`);
+  const x = number(parts[0], "x");
+  const y = number(parts[1], "y");
+  return relative ? { x: base.x + x, y: base.y + y } : { x, y };
+}
+
+// 極座標の三角関数誤差(例: cos 90° = 6e-17)を座標値へ残さない。
+function roundCoordinate(value) {
+  return Math.round(value * 1e9) / 1e9;
+}
+
+function isCoordinate(value) {
+  return /[,<]/.test(value);
 }
 
 function number(value, label) {

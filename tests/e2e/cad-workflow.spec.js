@@ -180,6 +180,17 @@ test("新規図面、コマンドライン、JSON Importを連続操作できる
   await command.fill("REDO");
   await command.press("Enter");
   await expect(page.getByLabel("図面情報パネル").getByText("測量", { exact: true })).toBeVisible();
+
+  await openDock(page, "プロパティ");
+  await command.fill("PLINE 0,0 @1000,0 @500<90 CLOSE");
+  await command.press("Enter");
+  await expect(quantity).toHaveText("3");
+  await expect(page.getByLabel("コマンドログ")).toContainText("CLI PLINE");
+
+  await command.fill("LINE @100,0 200,0");
+  await command.press("Enter");
+  await expect(page.getByLabel("コマンドログ")).toContainText("先頭の点に相対座標(@)は使用できません");
+  await expect(quantity).toHaveText("3");
 });
 
 test("CriticalまたはSeriousのアクセシビリティ違反がない", async ({ page }) => {
