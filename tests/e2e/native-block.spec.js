@@ -60,7 +60,8 @@ test("native BLOCK import, attributes, moves, undo and reload work in the editor
     for (let i = 0; i < data.length; i += 4) if (data[i] < 80 && data[i + 1] > 60 && data[i + 1] < 180 && data[i + 2] > 120) count++;
     return count;
   });
-  expect(pixels).toBeGreaterThan(100);
+  // Canvasのbacking storeはCSS表示寸法と一致する(Issue #78)。旧来の1180x760固定backing storeより画素数が少ないため閾値を下げる。
+  expect(pixels).toBeGreaterThan(30);
   await testInfo.attach("native-block-editor", { body: await page.screenshot({ path: testInfo.outputPath("native-block-editor.png"), fullPage: true }), contentType: "image/png" });
   // Export via the actual command dispatcher, including the browser download.
   await page.getByRole("button", { name: "出力", exact: true }).click();
