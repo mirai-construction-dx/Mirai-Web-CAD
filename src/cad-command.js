@@ -575,19 +575,27 @@ function resolvePoint(text, base, relative = false) {
     const parts = text.split("<");
     if (parts.length !== 2) throw new Error(`極座標は距離<角度形式で指定してください: ${text}`);
     const distance = number(parts[0], "distance");
-    const radians = (number(parts[1], "angle") * Math.PI) / 180;
-    return { x: roundCoordinate(base.x + distance * Math.cos(radians)), y: roundCoordinate(base.y + distance * Math.sin(radians)) };
+    // 巨大な角度でもラジアン変換が溢れないよう先に1周へ正規化する
+    const radians = ((number(parts[1], "angle") % 360) * Math.PI) / 180;
+    return finitePoint({ x: roundCoordinate(base.x + distance * Math.cos(radians)), y: roundCoordinate(base.y + distance * Math.sin(radians)) }, text);
   }
   const parts = text.split(",");
   if (parts.length !== 2) throw new Error(`座標はx,y、@dx,dy、距離<角度、@距離<角度のいずれかで指定してください: ${text}`);
   const x = number(parts[0], "x");
   const y = number(parts[1], "y");
-  return relative ? { x: base.x + x, y: base.y + y } : { x, y };
+  return relative ? finitePoint({ x: base.x + x, y: base.y + y }, text) : { x, y };
+}
+
+function finitePoint(value, text) {
+  if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) throw new Error(`座標が有効な数値範囲を超えています: ${text}`);
+  return value;
 }
 
 // 極座標の三角関数誤差(例: cos 90° = 6e-17)を座標値へ残さない。
 function roundCoordinate(value) {
-  return Math.round(value * 1e9) / 1e9;
+  const scaled = value * 1e9;
+  // 1e9倍で溢れる巨大値は丸め不要(誤差は相対的に無視できる)なのでそのまま返す
+  return Number.isFinite(scaled) ? Math.round(scaled) / 1e9 : value;
 }
 
 function isCoordinate(value) {

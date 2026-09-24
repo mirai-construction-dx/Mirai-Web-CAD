@@ -203,6 +203,10 @@ test("command line accepts polar coordinates as point arguments and rejects ambi
   assert.throws(() => parseCadCommand("LINE 0,0 @10<", context()), /angleが空/);
   assert.throws(() => parseCadCommand("LINE 0,0 10<20<30", context()), /距離<角度/);
   assert.throws(() => parseCadCommand("LINE 0,0 @abc<30", context()), /distanceが数値ではありません/);
+  assert.throws(() => parseCadCommand("PLINE 1e308,0 @1e308,0", context()), /有効な数値範囲/);
+  assert.throws(() => parseCadCommand("LINE 1e308,0 @1e308<0", context()), /有効な数値範囲/);
+  assert.match(parseCadCommand("DIST 0,0 1<1e308", context()).message, /^距離=1 /);
+  assert.equal(parseCadCommand("LINE 0,0 1e300<0", context()).commands[0].entity.points[1].x, 1e300);
   // 極座標の移動量はIDと誤認せず座標として扱う
   const moved = parseCadCommand("MOVE 100<0", context({ drawing, selectedId }));
   assert.deepEqual(moved.commands[0].id, selectedId);
