@@ -68,7 +68,7 @@ flowchart LR
 
 以下は、開発者・評価担当者向けの詳しい実装状況です。**試作**は動作確認用、**限定対応**は主なケースのみ対応、**実案件認定済み**は実案件による受入試験済み、という意味です。現在、実案件認定済みの機能はありません。
 
-GitHub正本は`Kensan196948G/Mirai-Web-CAD`です。2026-08-26に`Construction-Enterprise-OS/Mirai-Web-CAD`から履歴を保持して移行しました。
+GitHub正本は`mirai-construction-dx/Mirai-Web-CAD`です。2026-08-26に`Construction-Enterprise-OS/Mirai-Web-CAD`から履歴を保持して`Kensan196948G/Mirai-Web-CAD`へ移行し、2026-09-24にGitHub組織`mirai-construction-dx`へTransferしました。
 
 | 領域 | 段階 | 内容 |
 | --- | --- | --- |

@@ -747,7 +747,7 @@ CAD正本と成果物を完成させずにAI機能だけを増やすと、「賢
 ## 参考
 
 - [Mirai Web CAD本番](https://mirai-web-cad.mirai-dx-platform.com/)
-- [Mirai Web CAD GitHub](https://github.com/Kensan196948G/Mirai-Web-CAD)
+- [Mirai Web CAD GitHub](https://github.com/mirai-construction-dx/Mirai-Web-CAD)
 - [Autodesk AutoCAD機能](https://www.autodesk.com/products/autocad/features)
 - [AutoCAD Web](https://www.autodesk.com/products/autocad-web/overview)
 - [ARES Standard公式](https://www.graebert.com/ja/cad-software/ares-standard/)

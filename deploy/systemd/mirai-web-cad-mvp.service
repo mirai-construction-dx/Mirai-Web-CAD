@@ -1,6 +1,6 @@
 [Unit]
 Description=Mirai Web CAD MVP (local PostgreSQL, Cloudflare Access)
-Documentation=https://github.com/Kensan196948G/Mirai-Web-CAD/blob/main/docs/deployment-local.md
+Documentation=https://github.com/mirai-construction-dx/Mirai-Web-CAD/blob/main/docs/deployment-local.md
 After=network.target postgresql.service
 Requires=postgresql.service
 StartLimitIntervalSec=300

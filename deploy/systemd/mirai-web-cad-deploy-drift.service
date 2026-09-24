@@ -1,6 +1,6 @@
 [Unit]
 Description=Mirai Web CAD deploy provenance drift check
-Documentation=https://github.com/Kensan196948G/Mirai-Web-CAD/blob/main/docs/operations.md
+Documentation=https://github.com/mirai-construction-dx/Mirai-Web-CAD/blob/main/docs/operations.md
 After=network-online.target mirai-web-cad.service
 Wants=network-online.target
 Wants=mirai-web-cad.service
