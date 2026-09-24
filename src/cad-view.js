@@ -113,3 +113,70 @@ export function formatZoomPercent(scale) {
   if (percent >= 1) return `${Number(percent.toFixed(1))}%`;
   return `${Number(percent.toPrecision(2))}%`;
 }
+
+/** 図面ごとに記憶する表示位置の上限件数(古いものから破棄)。 */
+export const SAVED_VIEW_LIMIT = 30;
+
+/**
+ * カメラを、Canvas寸法に依存しない「表示中心の図面座標+縮尺」へ変換する。
+ * @param {{ x: number, y: number, scale: number }} camera
+ * @param {{ width: number, height: number }} viewport Canvasの表示寸法(CSS px)
+ */
+export function cameraToSavedView(camera, viewport) {
+  return {
+    cx: (viewport.width / 2 - camera.x) / camera.scale,
+    cy: (viewport.height / 2 - camera.y) / camera.scale,
+    scale: camera.scale
+  };
+}
+
+/** 保存した表示位置を、現在のCanvas寸法で同じ中心・縮尺になるカメラへ戻す。 */
+export function savedViewToCamera(view, viewport) {
+  return { x: viewport.width / 2 - view.cx * view.scale, y: viewport.height / 2 - view.cy * view.scale, scale: view.scale };
+}
+
+function validSavedView(view) {
+  return Boolean(view) && typeof view === "object"
+    && Number.isFinite(view.cx) && Number.isFinite(view.cy)
+    && Number.isFinite(view.scale) && view.scale > 0 && view.scale <= CAMERA_MAX_SCALE
+    && Number.isFinite(view.savedAt);
+}
+
+/**
+ * ブラウザ保存値を検証して読み込む。壊れた値・不正な項目は捨てる(表示位置は利便機能のため失敗しても既定表示へ戻すだけ)。
+ * @param {string | null} raw
+ * @returns {Record<string, { cx: number, cy: number, scale: number, savedAt: number }>}
+ */
+export function parseSavedViews(raw) {
+  /** @type {Record<string, { cx: number, cy: number, scale: number, savedAt: number }>} */
+  const views = {};
+  try {
+    const parsed = JSON.parse(raw ?? "null");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return views;
+    for (const [drawingId, view] of Object.entries(parsed)) {
+      if (validSavedView(view)) views[drawingId] = { cx: view.cx, cy: view.cy, scale: view.scale, savedAt: view.savedAt };
+    }
+  } catch {
+    // 破損した保存値は無視する。
+  }
+  return views;
+}
+
+/** 図面の表示位置を記録し、上限を超えた古い記録を破棄した新しい一覧を返す。 */
+export function rememberSavedView(views, drawingId, view, savedAt) {
+  const next = { ...views, [drawingId]: { cx: view.cx, cy: view.cy, scale: view.scale, savedAt } };
+  const ids = Object.keys(next).sort((a, b) => next[b].savedAt - next[a].savedAt);
+  for (const id of ids.slice(SAVED_VIEW_LIMIT)) delete next[id];
+  return next;
+}
+
+/** 表示範囲に図形境界が1つでも入っているか。保存位置が図面から外れている場合は復元せずfitする判定に使う。 */
+export function boundsIntersectView(bounds, camera, viewport) {
+  return bounds.some((value) => {
+    const left = camera.x + value.minX * camera.scale;
+    const top = camera.y + value.minY * camera.scale;
+    const right = camera.x + value.maxX * camera.scale;
+    const bottom = camera.y + value.maxY * camera.scale;
+    return right >= 0 && bottom >= 0 && left <= viewport.width && top <= viewport.height;
+  });
+}

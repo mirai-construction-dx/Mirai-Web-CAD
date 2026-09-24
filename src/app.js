@@ -27,7 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
-import { boundsVisibleInView, canvasViewSize, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
+import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, canvasViewSize, parseSavedViews, rememberSavedView, savedViewToCamera, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -35,6 +35,8 @@ import { selectByPath } from "./cad-selection-tools.js";
 const VIEW_MODES = new Set(["normal", "empty", "loading", "error"]);
 const requestedViewMode = new URLSearchParams(location.search).get("state") ?? "normal";
 const USER_SETTINGS_KEY = "mirai-web-cad-settings";
+// 図面ごとの表示位置(ブラウザ単位の利便機能。図面データやサーバーには保存しない)。
+const SAVED_VIEWS_KEY = "mirai-web-cad-views";
 const LEGACY_AI_SETTINGS_KEY = "mirai-web-cad-ai-settings";
 const GRID_INTERVALS = new Set([100, 250, 500, 1000]);
 const DOCK_WIDTH_MIN = 260;
@@ -323,6 +325,8 @@ const state = {
   fitPending: false,
   // 起動直後やAPIからの図面差替え後の描画で、表示に収まらない図面だけをZOOM EXTENTSする。
   outOfViewFitPending: true,
+  // 利用者の操作(ズーム・パン・全体表示)で表示が変わり、図面ごとの表示位置として保存すべき状態。
+  viewChanged: false,
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1508,6 +1512,7 @@ async function executeUiCommand(command) {
   if (command.action === "pan") {
     state.camera.x += command.offset.x * state.camera.scale;
     state.camera.y += command.offset.y * state.camera.scale;
+    state.viewChanged = true;
     log(`パン: ${command.offset.x},${command.offset.y}`);
   }
   if (command.action === "plot") {
@@ -1572,6 +1577,38 @@ function updateZoomReadouts() {
   if (readout) readout.textContent = text;
   const scale = document.querySelector("#scaleReadout");
   if (scale && state.space !== "layout") scale.textContent = `縮尺 ${text}`;
+}
+
+/** @type {{ drawingId: string, view: { cx: number, cy: number, scale: number } } | null} */
+let pendingViewSave = null;
+let viewSaveTimer = 0;
+
+function loadSavedViews() {
+  try {
+    return parseSavedViews(localStorage.getItem(SAVED_VIEWS_KEY));
+  } catch {
+    return {};
+  }
+}
+
+// ズーム・パンの連続操作で書き込みが集中しないよう、最後の表示だけを少し遅らせて保存する。
+// 図面IDと表示位置は操作時点で確定させ、直後に図面が切り替わっても取り違えない。
+function scheduleViewSave(view) {
+  pendingViewSave = { drawingId: state.drawing.id, view: cameraToSavedView(state.camera, view) };
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = window.setTimeout(flushViewSave, 300);
+}
+
+function flushViewSave() {
+  clearTimeout(viewSaveTimer);
+  if (!pendingViewSave) return;
+  const { drawingId, view } = pendingViewSave;
+  pendingViewSave = null;
+  try {
+    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(rememberSavedView(loadSavedViews(), drawingId, view, Date.now())));
+  } catch {
+    // 保存できない環境(プライベートモード等)では表示位置を記憶しないだけにする。
+  }
 }
 
 function fitCameraToDrawing() {
@@ -1837,6 +1874,7 @@ function zoomAtCenter(factor) {
   const after = screenToWorld(view.width / 2, view.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  state.viewChanged = true;
   log(`ズーム: ${zoomReadoutText()}`);
   render();
 }
@@ -2060,6 +2098,7 @@ function onPointerUp() {
   }
   if (state.panStart) {
     state.panStart = null;
+    state.viewChanged = true;
     log("パン表示を更新");
     render();
     return;
@@ -2109,6 +2148,7 @@ function onWheel(event) {
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  state.viewChanged = true;
   drawCanvas();
 }
 
@@ -2436,11 +2476,25 @@ function drawCanvas(pointerWorld = null) {
   const view = canvasViewSize(canvas);
   if (state.fitPending || state.outOfViewFitPending) {
     const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
-    if (state.fitPending || !boundsVisibleInView(bounds, state.camera, view)) state.camera = fitCameraToBounds(bounds, view);
+    const saved = state.fitPending ? null : loadSavedViews()[state.drawing.id];
+    const restored = saved ? savedViewToCamera(saved, view) : null;
+    if (state.fitPending) {
+      state.camera = fitCameraToBounds(bounds, view);
+      state.viewChanged = true;
+    } else if (restored && (bounds.length === 0 || boundsIntersectView(bounds, restored, view))) {
+      // 前回この図面を見ていた位置へ戻す。保存位置が図面から外れている(内容が変わった)場合は使わない。
+      state.camera = restored;
+    } else if (!boundsVisibleInView(bounds, state.camera, view)) {
+      state.camera = fitCameraToBounds(bounds, view);
+    }
     state.fitPending = false;
     state.outOfViewFitPending = false;
   }
   updateZoomReadouts();
+  if (state.viewChanged) {
+    state.viewChanged = false;
+    scheduleViewSave(view);
+  }
   const ctx = canvas.getContext("2d");
   // 以降の描画はCSS px座標で行い、backing storeの高DPI倍率はtransformで吸収する。
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3116,5 +3170,6 @@ try {
 applyTheme(state.settings.theme);
 // 表示寸法の変化でbacking storeを追従させる(カメラは維持)。
 window.addEventListener("resize", () => drawCanvas());
+window.addEventListener("pagehide", flushViewSave);
 render();
 checkApiHealth();

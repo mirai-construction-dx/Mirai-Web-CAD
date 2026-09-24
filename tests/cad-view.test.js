@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boundsVisibleInView, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
+import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, parseSavedViews, rememberSavedView, SAVED_VIEW_LIMIT, savedViewToCamera, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
 
 const toScreen = (camera, x, y) => ({ x: camera.x + x * camera.scale, y: camera.y + y * camera.scale });
 
@@ -97,4 +97,41 @@ test("zoom readout keeps significant digits below 1% instead of rounding to 0%",
   assert.equal(formatZoomPercent(0.0001), "0.1%");
   assert.equal(formatZoomPercent(0.0000123), "0.012%");
   assert.equal(formatZoomPercent(0), "0%");
+});
+
+test("saved views keep the world center and scale across canvas sizes", () => {
+  const camera = { x: 120, y: -40, scale: 0.02 };
+  const view = cameraToSavedView(camera, { width: 1000, height: 600 });
+  assert.deepEqual(savedViewToCamera(view, { width: 1000, height: 600 }), camera);
+  const resized = savedViewToCamera(view, { width: 400, height: 300 });
+  assert.equal(resized.scale, camera.scale);
+  assert.ok(Math.abs((200 - resized.x) / resized.scale - view.cx) < 1e-9);
+  assert.ok(Math.abs((150 - resized.y) / resized.scale - view.cy) < 1e-9);
+});
+
+test("saved views are validated and pruned to the most recent entries", () => {
+  assert.deepEqual(parseSavedViews(null), {});
+  assert.deepEqual(parseSavedViews("{broken"), {});
+  assert.deepEqual(parseSavedViews("[1,2]"), {});
+  const parsed = parseSavedViews(JSON.stringify({
+    ok: { cx: 1, cy: 2, scale: 0.5, savedAt: 10, extra: "dropped" },
+    nan: { cx: "1", cy: 2, scale: 0.5, savedAt: 10 },
+    zero: { cx: 1, cy: 2, scale: 0, savedAt: 10 },
+    huge: { cx: 1, cy: 2, scale: 1e9, savedAt: 10 }
+  }));
+  assert.deepEqual(parsed, { ok: { cx: 1, cy: 2, scale: 0.5, savedAt: 10 } });
+  let views = {};
+  for (let index = 0; index < SAVED_VIEW_LIMIT + 5; index += 1) views = rememberSavedView(views, `d${index}`, { cx: index, cy: 0, scale: 1 }, index);
+  assert.equal(Object.keys(views).length, SAVED_VIEW_LIMIT);
+  assert.ok(!("d0" in views) && "d34" in views);
+  views = rememberSavedView(views, "d5", { cx: 9, cy: 9, scale: 0.1 }, 100);
+  assert.deepEqual(views.d5, { cx: 9, cy: 9, scale: 0.1, savedAt: 100 });
+});
+
+test("a saved view is only restored when it still shows part of the drawing", () => {
+  const camera = { x: 0, y: 0, scale: 1 };
+  const viewport = { width: 100, height: 100 };
+  assert.equal(boundsIntersectView([{ minX: 90, minY: 90, maxX: 200, maxY: 200 }], camera, viewport), true);
+  assert.equal(boundsIntersectView([{ minX: 101, minY: 0, maxX: 200, maxY: 50 }], camera, viewport), false);
+  assert.equal(boundsIntersectView([], camera, viewport), false);
 });
