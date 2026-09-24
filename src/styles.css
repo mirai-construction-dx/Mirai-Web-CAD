@@ -992,6 +992,12 @@ dd {
   color: var(--muted);
 }
 
+/* 狭い画面では項目を縮めて文字を縦に折り返さず、ステータスバー内の横スクロールで表示する。 */
+.status-bar > :not(.spacer) {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .status-bar .coord {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   min-width: 150px;
@@ -1141,6 +1147,19 @@ dialog label {
 
   .dock-resize-handle {
     display: none;
+  }
+
+  /* 縦スクロールする画面で下端固定のコマンドラインがCanvasを覆わないよう、Canvasの直下へ配置する
+     (DOM上もCanvasパネルの直後に置いている。desktopは下端固定のまま)。 */
+  .app-shell,
+  .app-shell.command-log-1,
+  .app-shell.command-log-3 {
+    padding-bottom: 0;
+  }
+
+  .command-line {
+    position: static;
+    grid-column: 1 / -1;
   }
 }
 

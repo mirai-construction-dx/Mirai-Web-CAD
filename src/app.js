@@ -444,6 +444,19 @@ function render() {
         </div>
         ${state.space === "layout" ? layoutSpaceHtml(activeLayoutDrawing(drawing)) : modelSpaceHtml(drawing)}
       </section>
+      <section class="command-line ${commandLogClass}" aria-label="コマンドライン">
+        <div class="command-history" role="log" aria-label="コマンドログ" aria-live="polite" tabindex="0">
+          ${state.commandLog
+            .slice(-state.settings.commandLogLines)
+            .map((lineValue) => `<div>${escapeHtml(lineValue)}</div>`)
+            .join("")}
+        </div>
+        <form id="commandForm" class="command-form">
+          <span aria-hidden="true">&gt;</span>
+          <input id="commandInput" type="text" autocomplete="off" spellcheck="false" placeholder="Command" aria-label="コマンド入力" />
+          <button type="submit" title="コマンド実行" aria-label="コマンド実行">↵</button>
+        </form>
+      </section>
       <div
         id="dockResizeHandle"
         class="dock-resize-handle"
@@ -466,20 +479,6 @@ function render() {
         <div class="dock-body">${dockBodyHtml(drawing, selected)}</div>
       </aside>
     </main>
-
-    <footer class="command-line ${commandLogClass}" aria-label="コマンドライン">
-      <div class="command-history" role="log" aria-label="コマンドログ" aria-live="polite" tabindex="0">
-        ${state.commandLog
-          .slice(-state.settings.commandLogLines)
-          .map((lineValue) => `<div>${escapeHtml(lineValue)}</div>`)
-          .join("")}
-      </div>
-      <form id="commandForm" class="command-form">
-        <span aria-hidden="true">&gt;</span>
-        <input id="commandInput" type="text" autocomplete="off" spellcheck="false" placeholder="Command" aria-label="コマンド入力" />
-        <button type="submit" title="コマンド実行" aria-label="コマンド実行">↵</button>
-      </form>
-    </footer>
 
     ${newDrawingDialogHtml()}
     ${settingsDialogHtml(drawing)}
