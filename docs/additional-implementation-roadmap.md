@@ -42,6 +42,8 @@ UNDO
 REDO
 ```
 
+座標は`x,y`(絶対)、`距離<角度`(絶対極)、`@dx,dy`(直前点からの相対)、`@距離<角度`(相対極)で指定できる。角度は度で+X軸から反時計回り。`@`は同じコマンド内の2点目以降だけで使え、先頭点や移動量(`MOVE`/`COPY`/`STRETCH`の`dx,dy`)では拒否する。例: `PLINE 0,0 @1000,0 @500<90 CLOSE`、`RECT 10,20 @300,-200`。
+
 STRETCHは2点の矩形と移動量、MATCHPROPはコピー元IDを指定する。対象IDを省略すると現在の選択セットを使用。EXPLODEは属性付きBlockを黙って破棄せず拒否する。
 
 ## 受入ゲート
@@ -129,7 +131,7 @@ STRETCHは2点の矩形と移動量、MATCHPROPはコピー元IDを指定する�
 | SNAP-04 | 極・Object Snapトラッキング | 後続 |
 | SNAP-05 | Dynamic Input/カーソル表示 | 後続 |
 | SNAP-06 | 距離・角度直接入力 | 後続 |
-| SNAP-07 | 相対座標・極座標 | 後続 |
+| SNAP-07 | 相対座標・極座標 | 一部実装: CLI連続点の`@dx,dy`/`@距離<角度`、全座標引数の`距離<角度`。LASTPOINT・Canvas入力は後続 |
 | SNAP-08 | Snap Override/OSnap一時無効/Ortho一時切替 | 後続 |
 
 ### DIM: 寸法
