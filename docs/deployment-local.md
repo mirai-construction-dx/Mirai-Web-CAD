@@ -111,7 +111,7 @@ ENTRA_GROUP_CACHE_TTL_MINUTES=15   # 任意、既定15分。グループ変更�
 - グループ所属変更の反映には最大`ENTRA_GROUP_CACHE_TTL_MINUTES`分の遅延がある(インメモリキャッシュ、プロセス再起動で即時クリアされる)
 - キャッシュが空(プロセス起動直後・TTL切れ直後)の状態で複数利用者が同時にアクセスすると、各リクエストが独立してMicrosoft Graphへ問い合わせるため(リクエスト合流は未実装)、Entra ID側が輻輳中の場合に一時的な負荷集中が起き得る。7名規模のIT/DX部門での利用スケールでは実害は小さいと判断し、本実装では対応していない。将来の利用者数拡大時は再検討する
 
-### 3. Migration適用
+### 3. Migration適用(初回セットアップ)
 
 ```bash
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:verify
@@ -185,7 +185,18 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`mainブランチをfast-forward → npm ci → build → db:verify → systemctl restart → health確認`を行い、health確認に失敗した場合は直前のコミットへ自動ロールバックする。
+`mainブランチをfast-forward → npm ci → build → db:check → systemctl restart → health確認`を行い、DB検証またはhealth確認に失敗した場合は直前のコミットへ自動ロールバックする。
+
+DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
+
+#### Migrationを含むリリース
+
+`db:check`はmigrationを適用しない。新しいmigrationを含むリリースでは、未適用のままデプロイすると`db:check`が欠落を列挙してexit 1となり、デプロイは直前のコミットへ自動ロールバックされる。次の順で適用してからデプロイする。
+
+1. 事前バックアップを取得する(「バックアップ」節)
+2. 検証用DBで`db:verify`を実行し、migrationが冪等に適用できることを確認する
+3. 本番DBへ該当migrationを適用する(監査ログの所有権分離後は所有者ロールまたは管理者で実行。[運用・復旧メモ](operations.md)参照)
+4. `db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 

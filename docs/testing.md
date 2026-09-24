@@ -12,7 +12,7 @@
 | Build | `npm run build` | Cloudflare Pages配信物生成 |
 | E2E | `npm run test:e2e` | desktop/mobile UI、新規作成、CLI、Undo/Redo、Import、Canvas、API同期、AI承認、Keyboard、axe |
 | DB | `npm run db:verify` | 空PostgreSQLへMigration 0001〜0008/Seedを2回適用、監査追記専用トリガー**3件**(UPDATE/DELETE/TRUNCATE)の存在と各操作の拒否を検証 |
-| DB(読み取り専用・手動確認) | `npm run db:check` | 書き込みを行わず、migration作成物・監査トリガー3件と拒否・JSONB形状を検証。未適用ならexit 1。デプロイ手順が実行するのは現時点では`db:verify`(切替は手順書更新待ち、改善台帳P0-74) |
+| DB(読み取り専用・手動確認) | `npm run db:check` | 書き込みを行わず、migration作成物・監査トリガー3件と拒否・JSONB形状を検証。未適用ならexit 1。デプロイ手順(`scripts/deploy-local.sh`)もこれを実行する(2026-09-25〜、改善台帳P0-74) |
 | Recovery | `npm run db:backup` / `db:restore` | custom archive検証、空DB復元、主要件数確認 |
 | Secret | GitHub Actions | Gitleaksで独立リポジトリ全体を走査 |
 
