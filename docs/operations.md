@@ -176,16 +176,14 @@ node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812 --remote
 
 ## Rollback
 
-本番はこのホスト(kensan1969)上のsystemdサービスです。ロールバック手順:
+本番はこのホスト(kensan1969)上のsystemdサービスです。`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、稼働中のツリーで`npm ci`・`npm run build`は実行せず、向き先を直前のリリースへ戻します(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「ロールバック」、オーナー不在時は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md))。戻した後は本番とMVPの両方で確認します。
 
 ```bash
-git checkout <直前の正常コミットSHA>
-npm ci && npm run build
-sudo systemctl restart mirai-web-cad.service
-curl -fsS http://127.0.0.1:18812/api/health
+curl -fsS http://127.0.0.1:18812/api/health   # commit と distCommit が直前のSHAであること
+curl -fsS http://127.0.0.1:18813/api/health
 ```
 
-`scripts/deploy-local.sh`はhealth確認に失敗すると直前コミットへ自動ロールバックします。DB migrationは破壊的変更を含めていないため、ロールバック時も既存テーブルを削除しません。
+`scripts/deploy-local.sh`は、切替後のhealth・稼働commit・配信物のbuild元の確認に失敗すると、作業ツリーとsymlinkを直前の状態へ自動で戻します。DB migrationは破壊的変更を含めていないため、ロールバック時も既存テーブルを削除しません。
 
 Cloudflare Tunnel/DNS自体に問題がある場合(Tunnel停止、証明書失効等)は、Cloudflare Pages Custom Domainを再アタッチして`mirai-web-cad.pages.dev`相当の配信へ一時的に切り戻せます(Pagesプロジェクト・`functions/`・`wrangler.toml`はこのためにロールバック手段として残置しています)。
 

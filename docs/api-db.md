@@ -5,12 +5,12 @@
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 実装済み。匿名可。DB名などの内部情報は認証時のみ返す |
-| `GET` | `/api/drawings/demo` | 実装済み。`visibility=public`のデモ図面だけ匿名取得可 |
+| `GET` | `/api/drawings/demo` | 実装済み。`visibility=public`のデモ図面だけ匿名取得可。匿名応答では操作者・コメント投稿者・図形作成者(`actor`・`author`・`createdBy`)を役割名・`system`・`agent`以外は`user`に置き換え、コメント本文・図形の文字列に含まれるメールアドレス形式の文字列も`[メールアドレス省略]`に置き換える(独立レビューM-1)。氏名・電話番号など、メールアドレス以外の自由記述は対象外。認証済みの取得では置き換えない |
 | `POST` | `/api/drawings` | 実装済み。空/デモテンプレート、図面名、mm/mを指定して重複実行なしで作成 |
 | `GET` | `/api/drawings/:drawingId` | 実装済み。図面取得 |
 | `POST` | `/api/drawings/:drawingId/transactions` | 実装済み。CAD Coreコマンド一括適用 |
 | `POST` | `/api/drawings/:drawingId/agent-runs` | 実装済み。AI提案作成。ルールベースが`needs_input`かつプロンプトありかつサーバー側でLLM(OpenAI/Anthropic)が設定済みの場合のみフォールバック(fail-soft、LLM障害時もルールベース結果を返す)。actor単位でLLM呼び出しのみレート制限(既定10回/分) |
-| `POST` | `/api/agent-runs/:runId/approve` | 実装済み。AI提案を人の承認で適用 |
+| `POST` | `/api/agent-runs/:runId/approve` | 実装済み。AI提案を人の承認で適用。適用は1回だけで、適用済み(`status`が`planned`以外)の提案は409(同時の承認もDBの条件で1件に絞る。独立レビューM-2) |
 | `POST` | `/api/drawings/:drawingId/review` | 実装済み。レビュー提出、承認、新版 |
 | `POST` | `/api/drawings/:drawingId/comments` | 実装済み。`canComment`権限(reviewerも可)。コメント追加、監査ログに本文は記録しない |
 | `GET` | `/api/audit-logs` | 実装済み。承認系権限のみ。`limit`/`offset`ページング付きの一覧(読取り専用。状態を変更しない) |

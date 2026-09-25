@@ -3,6 +3,7 @@
 // .claude/plans/参照)。ローカル開発サーバーは緩い既定値で動くが、本番はセキュリティ
 // 上重要な環境変数(認証モード等)を必須化し、欠落時は起動そのものを拒否する。
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { handleApiRequest } from "../src/api-handler.js";
@@ -44,6 +45,8 @@ const env = validateEnv();
 // 起動を拒否する(fail-closed)。本番のproduction.envへ設定するかは運用判断とする。
 const deployInfo = evaluateDeployProvenance({ cwd: root });
 env.DEPLOY_INFO = {
+  // 配信物(dist/)のbuild元commit。デプロイでdistのsymlinkが切り替わるため、healthのたびに読む。
+  distCommit: () => readDistCommit(staticRoot),
   commit: deployInfo.info.commit,
   commitShort: deployInfo.info.commitShort,
   branch: deployInfo.info.branch,
@@ -276,6 +279,15 @@ function requireEnv(name, missing) {
 // - strict: 未レビューのcommitが稼働している状態での起動を拒否する(EX_CONFIG=78)。
 // 「本番で何が動いているか分からない」状態を検知可能にするのが目的であり、
 // 検知そのものが業務を止めないよう既定は継続とする(docs/operations.md参照)。
+function readDistCommit(distRoot) {
+  try {
+    const info = JSON.parse(readFileSync(path.join(distRoot, "build-info.json"), "utf8"));
+    return typeof info.commit === "string" ? info.commit : null;
+  } catch {
+    return null;
+  }
+}
+
 function enforceDeployGuard(deploy) {
   const detail = {
     provenance: deploy.status,

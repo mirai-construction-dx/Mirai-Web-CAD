@@ -3,6 +3,9 @@
 状態: 2026-08-15 制定（v1）／2026-09-13 改定（v2: Neon廃止、ローカルPostgreSQLへ全面置換）
 正本: 本ファイル、`GITHUB_POLICY.md`
 
+> [!IMPORTANT]
+> **Mirai-Web-CADでは、本仕様のGitHub運用(完全自動マージ、Workspace指示の上書き)を適用しない**(2026-09-25、独立レビュー H-2)。本リポジトリは承認必須のA型で、GitHub運用は[GITHUB_POLICY.md](../../GITHUB_POLICY.md)(Mirai-Web-CAD版)に従う。本仕様のCloudflare・PostgreSQLの記述は参考情報として残す。
+
 ## 1. 目的と適用範囲
 
 Linux上の全Workspaceで、以下を共通基盤として利用する。
