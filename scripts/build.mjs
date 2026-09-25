@@ -1,4 +1,5 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { build } from "esbuild";
 import path from "node:path";
 
@@ -24,4 +25,20 @@ await build({
   legalComments: "none"
 });
 
-console.log(`build ok: ${path.relative(root, dist)}`);
+// 配信物がどのcommitからbuildされたかを記録する。本番は作業ツリーのdist/を配信するため、
+// 稼働中のサーバーのcommitと配信物のbuild元がずれていないかをhealthとデプロイで照合する。
+const commit = process.env.BUILD_COMMIT || readGitCommit();
+await writeFile(path.join(dist, "build-info.json"), `${JSON.stringify({ commit, builtAt: new Date().toISOString() }, null, 2)}\n`);
+
+console.log(`build ok: ${path.relative(root, dist)}${commit ? ` (${commit.slice(0, 7)})` : ""}`);
+
+function readGitCommit() {
+  try {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    // 未コミットの変更を含むbuildは、レビュー済みcommitと区別できるよう印を付ける。
+    return dirty ? `${head}-dirty` : head;
+  } catch {
+    return null;
+  }
+}

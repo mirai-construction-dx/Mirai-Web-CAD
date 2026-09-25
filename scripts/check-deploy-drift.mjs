@@ -35,12 +35,20 @@ let canJudge = evaluation.status !== DEPLOY_PROVENANCE.UNKNOWN;
 // 稼働APIの報告値との突き合わせ。--url を指定したのに取得できない場合は
 // 「稼働プロセスを検証できなかった」ことを失敗として扱う(見逃しを防ぐ)。
 let runningCommit = null;
+let runningDistCommit = null;
 if (url) {
   const running = await readRunningCommit(url);
   if (running.ok && running.commit) {
     runningCommit = running.commit;
+    runningDistCommit = running.distCommit;
     if (evaluation.info.commit && runningCommit !== evaluation.info.commit) {
       reasons.push(`稼働APIが報告するcommit(${short(runningCommit)})と作業ツリーのcommit(${short(evaluation.info.commit)})が一致しません`);
+      fatal = true;
+    }
+    // 画面(dist/)はリクエストごとに読まれるため、サーバーと別のcommitからbuildされた配信物が
+    // 混ざっていても稼働commitだけでは検出できない(独立レビュー H-1)。
+    if (runningDistCommit !== runningCommit) {
+      reasons.push(`配信中の画面のbuild元(${runningDistCommit ? short(runningDistCommit) : "不明"})が稼働commit(${short(runningCommit)})と一致しません`);
       fatal = true;
     }
   } else {
@@ -67,6 +75,7 @@ const report = {
   local: evaluation.info,
   counts: evaluation.counts,
   runningApiCommit: runningCommit,
+  runningDistCommit,
   remoteMain,
   driftReasons: reasons
 };
@@ -87,6 +96,7 @@ function printHumanReport(current) {
   lines.push(`  ahead/behind     : ${current.counts ? `${current.counts.ahead} / ${current.counts.behind}` : "不明"}`);
   lines.push(`  未コミット変更    : ${current.local.dirty === null ? "不明" : current.local.dirty ? "あり" : "なし"}`);
   if (current.runningApiCommit) lines.push(`  稼働APIのcommit   : ${current.runningApiCommit}`);
+  if (current.runningApiCommit) lines.push(`  配信物のbuild元   : ${current.runningDistCommit ?? "不明"}`);
   if (current.remoteMain) lines.push(`  リモート origin/main: ${current.remoteMain}`);
   lines.push(`  判定             : ${label(current.status)}`);
   for (const reason of current.driftReasons) lines.push(`   - ${reason}`);
@@ -137,7 +147,8 @@ async function readRunningCommit(baseUrl) {
     });
     const body = await response.json().catch(() => null);
     const commit = body?.deploy?.commit;
-    if (typeof commit === "string" && commit.length > 0) return { ok: true, commit };
+    const distCommit = typeof body?.deploy?.distCommit === "string" ? body.deploy.distCommit : null;
+    if (typeof commit === "string" && commit.length > 0) return { ok: true, commit, distCommit };
     return { ok: false, error: `deploy.commitが応答に含まれていません(HTTP ${response.status})` };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

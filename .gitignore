@@ -1,6 +1,10 @@
-dist/
+# dist と node_modules はデプロイ後に .releases/<sha>/ へのsymlinkになる。
+# 末尾が/のパターンはディレクトリにしか一致せずsymlinkを無視できないため、/を付けない。
+/dist
 .wrangler/
-node_modules/
+/node_modules
+/.releases/
+/.swap-*
 playwright-report/
 artifacts/
 test-results/

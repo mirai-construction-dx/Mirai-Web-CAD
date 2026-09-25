@@ -185,9 +185,17 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`mainブランチをfast-forward → npm ci → build → db:check → systemctl restart → health確認`を行い、DB検証またはhealth確認に失敗した場合は直前のコミットへ自動ロールバックする。
+2026-09-25〜(独立レビュー H-1)、次の順で行う。本番とMVPは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
 
-fast-forwardでこのスクリプト自体が更新された場合は、新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
+1. 対象commit(origin/main)を`.releases/<sha>/`へ`git archive`で書き出し、そこで`npm ci --ignore-scripts`と`npm run build`(`BUILD_COMMIT`を`dist/build-info.json`へ記録)を行う
+2. 本番DB・MVP DBへ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は、ユニットの`EnvironmentFile=`(通常`~/.config/mirai-web-cad/mvp.env`)の`DATABASE_URL`(外側の引用符はsystemdと同じく外す)で、サービスが実際に使うDBと同じものを検証する。対象commitが既に配信中の再デプロイでは、配信中のリリースを消さずに再利用する。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
+3. 作業ツリーをfast-forwardし、`dist`と`node_modules`を`.releases/<sha>/`へのsymlinkとして一度の操作(rename)で切り替える。初回だけ、実体のディレクトリを`.releases/legacy-<直前のcommit>/`へ退避する
+4. 本番とMVPを再起動し、両方の`/api/health`で`deploy.commit`(サーバーのコード)と`deploy.distCommit`(配信物のbuild元)が対象commitと一致することを確認する
+5. 手順3以降で失敗した場合は、作業ツリー・symlinkを直前の状態へ戻し、両サービスを再起動して直前のcommitで一致することを確認する(ロールバック中は途中の失敗で止めず、各手順の結果を出力する。`build-info.json`を持たない以前の配信物へ戻した場合は、以前のサーバーが`distCommit`を返さないため、healthと稼働commitだけで確認する)
+
+`.releases/`には直近3件のリリース(と直前の向き先)を残す。`npm run deploy:drift -- --url http://127.0.0.1:18812`は、稼働commitと配信物のbuild元の不一致も乖離として報告する。
+
+対象commitでこのスクリプト自体が更新される場合は、何も変更しないうちに新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ。新しい手順に構文エラーがあれば何も変えずに中止)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
 
 DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
 
@@ -195,7 +203,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
 
 `db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、検証済み(`convalidated`)のCHECK制約7、有効(`indisvalid`)な索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
 
-新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、直前のコミットへ自動ロールバックされる。
+新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、稼働中の作業ツリー・配信物を何も切り替えずに中止する。
 
 **本番DBへ`db:verify`を実行してはならない**(全migrationに加えて`seeds/demo.sql`を適用し、デモ行の投入・`dwg_demo_001`の上書き・監査トリガの再作成が起きる)。次の順で、対象migrationだけを適用してからデプロイする。
 
@@ -208,7 +216,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
    ```
 
    `MIGRATION_DATABASE_URL`は所有者ロール等の接続文字列(`production.env`とは別に安全に管理し、リポジトリへ置かない)。
-4. `DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
+4. 本番DB(`production.env`)とMVP DB(`mvp.env`)の両方で`db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する(`DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/<env>)" npm run db:check`)
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 
@@ -264,10 +272,15 @@ journalctl -u mirai-web-cad-cloudflared.service -f
 
 オーナー不在時(承認必須のためmainを戻せない場合)は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md)に従う。
 
+`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、**稼働中のツリーで`npm ci`・`npm run build`を実行せず**、向き先を直前のリリースへ戻す(`.releases/`に無い場合だけ別ディレクトリでbuildしてから切り替える)。
+
 ```bash
-git checkout <直前の正常コミットSHA>
-npm ci && npm run build
-sudo systemctl restart mirai-web-cad.service
+prev=<直前の正常コミットSHA>
+rel=.releases/$prev               # 初回切替時に退避した分は .releases/legacy-$prev
+git checkout --quiet "$prev"
+ln -sfn "$rel/node_modules" .swap-node_modules && mv -Tf .swap-node_modules node_modules
+ln -sfn "$rel/dist" .swap-dist && mv -Tf .swap-dist dist
+sudo systemctl restart mirai-web-cad.service mirai-web-cad-mvp.service
 ```
 
 Cloudflare Tunnel/DNSに問題がある場合は、Cloudflare Pages Custom Domainを再アタッチする(Pagesプロジェクト・`functions/`・`wrangler.toml`はロールバック手段として当面残置している)。

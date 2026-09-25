@@ -14,6 +14,8 @@ WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v22.22.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # --url で稼働中プロセスのcommitも突き合わせる(作業ツリーだけでは再起動漏れを検出できない)。
 ExecStart=/usr/bin/env node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812
+# MVPも同じ作業ツリーの配信物を使うため、稼働commitと配信物のbuild元を同様に照合する。
+ExecStart=/usr/bin/env node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18813
 # 乖離を検出した場合は非ゼロ終了し、journalに理由を残す(systemctl status / journalctlで確認)。
 # 通知連携(Teams/メール)は Issue #8 で扱う。
 

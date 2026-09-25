@@ -21,11 +21,17 @@ git status --porcelain            # 空であること(未コミット変更が�
 git rev-parse --short HEAD        # 現在の稼働commit(記録する)
 git log --oneline -5              # 直前の正常commitを特定する(デプロイ前の稼働commit)
 
-git checkout --quiet <直前の正常commitSHA>
-npm ci
-npm run build
+ls -lt .releases/                 # 直前の正常commitのリリース(.releases/<sha>/ または legacy-<sha>/)を確認する
+
+prev=<直前の正常commitSHA>
+rel=.releases/$prev               # 退避した初回分は .releases/legacy-$prev
+git checkout --quiet "$prev"
+ln -sfn "$rel/node_modules" .swap-node_modules && mv -Tf .swap-node_modules node_modules
+ln -sfn "$rel/dist" .swap-dist && mv -Tf .swap-dist dist
 sudo systemctl restart mirai-web-cad.service mirai-web-cad-mvp.service
 ```
+
+`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkです。**稼働中のツリーで`npm ci`や`npm run build`を実行しないでください**(依存が一時的に消え、未検証の画面が配信されます)。直前のリリースが`.releases/`に無い場合だけ、別ディレクトリでbuildしてから向き先を切り替えます。
 
 デプロイ前の稼働commitは、`deploy-local.sh`の出力の「ロールバック先」、またはデプロイ前に記録した`/api/health`の`deploy.commit`で確認します。
 
@@ -35,7 +41,7 @@ sudo systemctl restart mirai-web-cad.service mirai-web-cad-mvp.service
 for port in 18812 18813; do curl -s --max-time 5 http://127.0.0.1:$port/api/health; echo; done
 ```
 
-`ok: true`、`deploy.commit`が戻したcommit、`db.mode: connected`であることを確認します。`npm run deploy:drift`はmainより古いcommitが稼働しているため「一致」になりません(想定どおり)。
+`ok: true`、`deploy.commit`と`deploy.distCommit`が戻したcommit、`db.mode: connected`であることを確認します。`npm run deploy:drift`はmainより古いcommitが稼働しているため「一致」になりません(想定どおり)。
 
 ## 4. 記録と復帰後の対応
 
