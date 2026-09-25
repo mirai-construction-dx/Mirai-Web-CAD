@@ -38,6 +38,8 @@ npm run test:e2e      # Playwright desktop/mobile(ポートが空いている前
 ## 4. 変更の規約
 
 - Branch → PR → CI → レビュー → squash merge。mainへの直接pushは禁止。
+- AIエージェントはBot(`mirai-dx-bot`、Team `ai-authors`)の名義でcommit・push・PR作成する。Botは承認しない(組織の開発ガバナンス Portfolio `docs/operations/PORT-GOV-001`)。
+- 本リポジトリの承認方式は**B型**: 低リスクの変更は品質ゲート(必須チェック・脆弱性・secret・PR本文等)を満たせばマージでき、承認は0。オーナーのY/Nが必要なのは高リスク変更(認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)に限る。オーナーが別途指示した場合(例: 全マージでY/Nを取る)はその指示に従う。
 - PR本文は目的・変更・影響・テスト・セキュリティ・Migration・Deployment・Rollback・残課題・production-safe判定を記載する。
 - 秘密値・資格情報・接続文字列・個人情報をGit、ログ、PR、テスト結果へ出さない。
 - migrationはadditiveかつ後方互換のみ。本番DBへ`db:verify`を実行しない(手順は[ローカルデプロイ運用メモ](docs/deployment-local.md))。

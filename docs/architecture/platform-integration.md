@@ -28,12 +28,12 @@
 | main直接push禁止・必須CI | 充足 | Branch Protection(必須チェック5件+strict)とRuleset(必須チェック10件) |
 | ActionのSHA固定、Secret Scan | 充足 | `.github/workflows/ci.yml` |
 | SBOM | 一部 | CycloneDX SBOMはCIで生成。署名・Attestationは無い |
-| マージ前の人間レビュー(通常2名/重要3名) | **不整合** | Rulesetの必須承認数は0。配布中の[GITHUB_POLICY.md](../../GITHUB_POLICY.md)(中央ポリシー)は必須チェック通過後の自動マージを標準とする。現行運用は利用者のY/N判断でマージしているが、GitHub上の承認記録ではない |
-| CODEOWNERSはTeam指定 | 一部 | `.github/CODEOWNERS`は個人のみ。組織に存在するTeamのうち`core-maintainers`/`platform-reviewers`/`security-reviewers`は本リポジトリへのアクセス権がない(アクセスのないTeamはCODEOWNERSで無効)。`ai-authors`は書込み権限を持つがCODEOWNERSには未記載(AI作成者のTeamでありレビュー担当ではない)。`application-reviewers`・`data-spatial-reviewers`は未作成 |
+| マージ前の人間レビュー(通常2名/重要3名) | 組織決定どおり(見直し待ち) | 組織の開発ガバナンス(Portfolio `docs/operations/PORT-GOV-001`、Core ADR-0016)でWeb-CADは**B型(品質ゲートを満たせば自動マージ、承認0)**。低リスクの変更は品質ゲート(必須チェック等)だけでマージでき、オーナーのY/Nは高リスク変更(PORT-GOV-001 §5: 認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)に限る。2026-09-25時点では、オーナーの指示により全マージでY/Nを取得している(運用上の追加措置で、規則上の要件ではない)。V3.6の2名/3名は、2人目(security-reviewers、2026-09-28提示予定)の参加後にADR-0016の見直し条件で再判断 |
+| CODEOWNERSはTeam指定 | 組織決定どおり | PORT-GOV-001 §2.2でB型のRepositoryにCODEOWNERSは不要(承認を要求しないため)。`.github/CODEOWNERS`(個人)は既存のまま。承認型への変更時にTeam(Write以上)で整備する |
 | AIの結果の反映に人間承認(承認者の分離・承認記録) | **未充足** | 反映には利用者の明示操作が必要だが、編集権限があれば誰でも適用でき、オフライン時は承認記録を残さない([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)) |
-| AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **不整合** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(提案) |
+| AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **承認済み例外(期限付き)** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(承認済み、見直し期限2026-12-25) |
 | Coreの版付き成果物を版・digest固定で取り込む(`core-lock/`等) | 未対応(現時点で利用対象なし) | Web-CADはCoreの契約(event/evidence/MCP)をまだ使っていない。取込み時の手順は§3 |
-| 基盤の台帳(Core `registries/systems.yaml`等)への登録 | 未対応 | Coreにweb-cadの登録なし。system_idの決定が必要 |
+| 基盤の台帳(Core `registries/systems.yaml`等)への登録 | 決定・登録申請中 | system_idは`web-cad`(2026-09-25オーナー決定)。Core PR #27で登録申請(audienceは論理値`api://web-cad`、MCPなし)。Platform-Infraの台帳は未作成 |
 | MCPサーバー公開(契約はCoreで版管理、`server_id`+`tool_name`のAllowlist) | 未対応 | 第3段階。ツール仕様は文書に無い |
 | 案件IDはMCIPが発番 | 不整合(将来) | `migrations/0001`の独自`projects`と`0007`の`project_members` |
 | 確定版をCDEへ登録 | 未対応 | CDE連携なし。承認済み版はWeb-CAD内で保持 |
@@ -59,7 +59,7 @@ Core `schemas/evidence/ai-run.schema.json`と`schemas/event/envelope.schema.json
 
 | Core必須項目 | Web-CADの対応 | 状態 |
 | --- | --- | --- |
-| `source_system` | なし(system_id未確定) | 未対応 |
+| `source_system` | `web-cad`(2026-09-25決定、Core PR #27で登録申請中)。証跡への出力・変換は未実装 | 未対応(値は確定) |
 | `event_id` / envelope `id` | `audit_logs.id`、`agent_runs.id` | 対応可 |
 | `run_id` | `agent_runs.id` | 対応可 |
 | `request_id` / `correlation_id` | APIの`x-request-id`はDBへ保存していない | 未対応 |
@@ -71,5 +71,5 @@ Core `schemas/evidence/ai-run.schema.json`と`schemas/event/envelope.schema.json
 
 ## 5. 本リポジトリ内で実施済み・今後の対応
 
-- 実施済み(本PR): `CLAUDE.md`・`AGENTS.md`の新設、本文書、ADR-0003/0004(提案)、判断事項の台帳化。
+- 実施済み: `CLAUDE.md`・`AGENTS.md`の新設、本文書、ADR-0003(承認済み)/0004(提案)、判断事項の台帳化と2026-09-25のオーナー決定の反映。
 - 他リポジトリ・設計判断が必要(記録のみ。本リポジトリでは実施しない): 台帳§4を参照。

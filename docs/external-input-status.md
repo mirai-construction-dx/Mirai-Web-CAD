@@ -45,22 +45,22 @@
 
 全体構成 V3.6・リポジトリ構成 V3.6・OS/アプリ選定 V3.5 とWeb-CADの差のうち、本リポジトリだけでは確定できない事項。詳細は[基盤連携の要件と現状](architecture/platform-integration.md)。
 
-| 事項 | 2026-09-25の実測 | 判断者・必要な入力 |
+| 事項 | 状態(2026-09-25) | 内容・次の入力 |
 | --- | --- | --- |
-| AI Provider直接呼出し | 方針は禁止。Web-CADは本番でOpenAI/Anthropicを直接呼出し中 | 暫定例外として認めるか、移行時期([ADR-0003](adr/ADR-0003-ai-provider-direct-call-interim.md))。MCAH Model GatewayのWeb-CAD向け契約 |
-| system_id | Core `registries/systems.yaml`にweb-cadの登録なし。Platform-Infra(main)にはsystems台帳自体が未作成 | system_idとaudienceの決定、Core/Platform-Infra側での登録 |
-| マージ前の人間レビュー | 方針は通常2名・重要3名。Rulesetの必須承認数は0、配布中の`GITHUB_POLICY.md`は自動マージを標準化 | 1名体制での承認方法(自己承認不可の制約)と、中央ポリシーの改訂要否 |
-| CODEOWNERSのTeam | 組織のTeamは`core-maintainers`/`platform-reviewers`/`security-reviewers`/`ai-authors`。Web-CADへのアクセス権があるのは`ai-authors`のみ。`application-reviewers`・`data-spatial-reviewers`は未作成 | Teamの作成とWeb-CADへの権限付与(権限境界の変更) |
-| 技術標準の適用範囲 | 標準はPostgreSQL 18・Node 24(buildのみ)・React+TS+Vite・FastAPI。Web-CADは16・22・vanilla JS・Node API | Domain Productへの適用有無([ADR-0004](adr/ADR-0004-tech-stack-vs-os-selection.md)) |
-| Core成果物の版 | Release `v0.1.0`のみ公開、タグは`v0.6.0`まで。CEOSは`v0.6.0`をvendoring | Web-CADが契約を取り込む時点で採用する版と配布方式 |
-| 案件ID・確定版・MCP | 案件IDは独自採番、確定版のCDE登録なし、MCPサーバーなし(第3段階) | MCIPの案件ID API、CDE登録方式、Web-CAD MCPのツール仕様 |
-| Organization名 | 全体構成は候補「mirai-construction」、組織構成案と実体は`mirai-construction-dx` | 文書側の表記統一 |
+| 1. system_id | **決定** | `web-cad`(オーナー決定)。Core `registries/systems.yaml`への登録はMirai-Harness-Core PR #27(A型: オーナーのApprove後にマージ)。Platform-Infraの台帳は未作成 |
+| 2. AI Provider直接呼出し | **決定** | 案A(期限付きの暫定例外)、見直し期限2026-12-25([ADR-0003](adr/ADR-0003-ai-provider-direct-call-interim.md)承認済み)。移行条件はMCAH Model GatewayのWeb-CAD向け契約公開とsystem_id登録 |
+| 3. マージ前の人間レビュー | 組織決定済み・見直し待ち | 組織の開発ガバナンス(Portfolio `PORT-GOV-001`、Core ADR-0016)でWeb-CADは**B型**(品質ゲートで自動マージ、承認0)。2人目(security-reviewers、2026-09-28提示予定)の参加後に、重要変更の承認要件を再判断 |
+| 4. CODEOWNERSのTeam | 組織決定済み・見直し待ち | B型ではCODEOWNERS不要(PORT-GOV-001 §2.2)。3の見直しで承認型へ変える場合に、Write以上のTeamで整備 |
+| 5. 技術標準の適用範囲 | 必要時に判断 | 実行環境の更新が必要になった時点で判断([ADR-0004](adr/ADR-0004-tech-stack-vs-os-selection.md)提案)。契機の例: Node 22のサポート期限、PostgreSQL 16のサポート期限 |
+| 6. Core成果物の版 | 必要時に判断 | Coreの契約を取り込む時点で判断。原則は署名・ハッシュ付きRelease(現在v0.1.0のみ公開、タグはv0.6.0まで) |
+| 7. 案件ID・確定版・MCP | 必要時に判断 | 第3段階。MCIPの案件ID API、CDE登録方式、Web-CAD MCPのツール仕様が公開された時点で判断 |
+| 8. Organization名 | **決定** | `mirai-construction-dx`に統一。原典(全体構成 V3.6)のHTMLは変更せず、Portfolioの未決事項表(PORT-BL-001 BL-06)に決定を記録(Portfolio PR #20) |
 
 ## 再開条件
 
 - Cloudflare: 上記3権限を対象account/zoneだけに付けたtokenが現在のシェルへ投入済み
 - Entra: tenant内の対象UPN、グループGUID対応、Secret運用責任者、当番/SLA台帳の参照IDが確定
 - Phase 0: 許諾済みDXFの保管場所とUAT参加者台帳の参照IDが確定
-- 基盤整合: 上表の判断者による決定(決定ごとにADRのステータスと本表を更新)
+- 基盤整合: 3・4は2人目の参加時、5・6・7は必要になった時点で判断(決定ごとにADRのステータスと本表を更新)
 
 再開時も、秘密値や個人情報そのものはIssue、PR、Git、チャットへ貼り付けません。
