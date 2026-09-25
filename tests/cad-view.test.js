@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { keepCenterOnResize, boundsIntersectView, boundsVisibleInView, cameraToSavedView, parseSavedViews, rememberSavedView, SAVED_VIEW_LIMIT, savedViewToCamera, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
+import { cameraForWindow, pushViewHistory, VIEW_HISTORY_LIMIT, zoomCameraAtCenter, keepCenterOnResize, boundsIntersectView, boundsVisibleInView, cameraToSavedView, parseSavedViews, rememberSavedView, SAVED_VIEW_LIMIT, savedViewToCamera, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
 
 const toScreen = (camera, x, y) => ({ x: camera.x + x * camera.scale, y: camera.y + y * camera.scale });
 
@@ -145,4 +145,36 @@ test("canvas resize keeps the world point at the view center", () => {
   const centerAfter = { x: (to.width / 2 - next.x) / next.scale, y: (to.height / 2 - next.y) / next.scale };
   assert.deepEqual(centerAfter, centerBefore);
   assert.equal(next.scale, camera.scale);
+});
+
+test("ZOOM Window fits the picked rectangle to the canvas around its center", () => {
+  const viewport = { width: 800, height: 400 };
+  const camera = cameraForWindow({ x: 1000, y: 500 }, { x: 3000, y: 1500 }, viewport);
+  assert.equal(camera.scale, Math.min(800 / 2000, 400 / 1000));
+  assert.deepEqual(toScreen(camera, 2000, 1000), { x: 400, y: 200 });
+  // 逆向きの対角、細長い範囲、最大縮尺の上限。
+  assert.deepEqual(cameraForWindow({ x: 3000, y: 1500 }, { x: 1000, y: 500 }, viewport), camera);
+  assert.equal(cameraForWindow({ x: 0, y: 0 }, { x: 800, y: 0 }, viewport).scale, 1);
+  assert.equal(cameraForWindow({ x: 0, y: 0 }, { x: 1, y: 1 }, viewport).scale, CAMERA_MAX_SCALE);
+  assert.throws(() => cameraForWindow({ x: 5, y: 5 }, { x: 5, y: 5 }, viewport), /同じ/);
+});
+
+test("ZOOM nX scales around the view center", () => {
+  const viewport = { width: 800, height: 400 };
+  const camera = { x: 100, y: 50, scale: 0.1 };
+  const centerBefore = { x: (400 - camera.x) / camera.scale, y: (200 - camera.y) / camera.scale };
+  const zoomed = zoomCameraAtCenter(camera, 2, viewport);
+  assert.ok(Math.abs(zoomed.scale - 0.2) < 1e-12);
+  assert.ok(Math.abs((400 - zoomed.x) / zoomed.scale - centerBefore.x) < 1e-9);
+  assert.ok(Math.abs((200 - zoomed.y) / zoomed.scale - centerBefore.y) < 1e-9);
+  assert.equal(zoomCameraAtCenter({ x: 0, y: 0, scale: 1.5 }, 4, viewport).scale, CAMERA_MAX_SCALE);
+});
+
+test("view history skips duplicates and keeps only the most recent entries", () => {
+  let history = pushViewHistory([], { x: 0, y: 0, scale: 1 });
+  history = pushViewHistory(history, { x: 0, y: 0, scale: 1 });
+  assert.equal(history.length, 1);
+  for (let index = 1; index <= VIEW_HISTORY_LIMIT + 5; index += 1) history = pushViewHistory(history, { x: index, y: 0, scale: 1 });
+  assert.equal(history.length, VIEW_HISTORY_LIMIT);
+  assert.equal(history.at(-1).x, VIEW_HISTORY_LIMIT + 5);
 });
