@@ -55,6 +55,9 @@ test("ZOOM W without points picks the window with two canvas clicks", async ({ p
   await command(page, "ZOOM W");
   const canvas = page.locator("#cadCanvas");
   const box = await canvas.boundingBox();
+  // 右クリックは窓の角として受け付けない。
+  await canvas.click({ button: "right", position: { x: box.width / 2 - 20, y: box.height / 2 - 15 } });
+  await expect(page.getByLabel("コマンドログ")).not.toContainText("もう一方の角");
   await canvas.click({ position: { x: box.width / 2 - 20, y: box.height / 2 - 15 } });
   await expect(page.getByLabel("コマンドログ")).toContainText("もう一方の角");
   await canvas.click({ position: { x: box.width / 2 + 20, y: box.height / 2 + 15 } });

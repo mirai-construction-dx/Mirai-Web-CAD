@@ -2078,6 +2078,8 @@ function onPointerDown(event) {
   }
 
   if (state.tool === "zoomwindow") {
+    // 窓ズームの角は主ボタン(左クリック)だけで受け付ける。
+    if (event.button !== 0) return;
     // 窓ズームはスナップせず、クリックした位置そのものを範囲の角にする。
     state.draftPoints.push(rawWorld);
     if (state.draftPoints.length === 2) {
@@ -3079,6 +3081,8 @@ async function checkApiHealth() {
       state.layoutDraft = null;
       state.viewHistory = [];
       endWheelGroup();
+      // 前の図面で指定した窓ズームの角などの作図途中の点を持ち越さない。
+      state.draftPoints = [];
       // 別の図面へ切り替わるため、前の図面向けに応答待ちの操作結果は適用させない。
       drawingEpoch += 1;
     }
