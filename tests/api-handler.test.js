@@ -885,3 +885,50 @@ test("approval rejects a proposal when its server-side run is missing", async ()
   assert.equal(approveResponse.status, 404);
   assert.match(approveBody.error, /Agent Run/);
 });
+
+test("anonymous public demo drawing does not expose who edited or commented on it", async () => {
+  resetMemoryStore();
+  const email = "site.engineer@company.example";
+  const post = (path, idempotencyKey, version, body) =>
+    handleApiRequest(
+      new Request(`https://example.test/api/drawings/dwg_demo_001/${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-demo-role": "drafter",
+          "x-demo-actor": email,
+          "idempotency-key": idempotencyKey,
+          "expected-version": String(version)
+        },
+        body: JSON.stringify(body)
+      }),
+      env
+    );
+  const edited = await post("transactions", "pii-edit", 1, {
+    label: "線を追加",
+    commands: [{ op: "add", entity: { id: "e_pii_line", type: "line", layerId: "layer-frame", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], createdBy: email } }]
+  });
+  assert.equal(edited.status, 200, JSON.stringify(await edited.clone().json()));
+  const commented = await post("comments", "pii-comment", 2, { body: `確認お願いします(連絡先 ${email} / 太郎@example.com / taro@例子.公司)` });
+  assert.equal(commented.status, 201);
+
+  // 認証済みの利用者には、誰が操作したかが見える。
+  const internal = await (await handleApiRequest(
+    new Request("https://example.test/api/drawings/demo", { headers: { "x-demo-role": "viewer" } }),
+    env
+  )).json();
+  assert.ok(JSON.stringify(internal.drawing).includes(email));
+
+  const response = await handleApiRequest(new Request("https://example.test/api/drawings/demo"), {
+    APP_ENV: "production",
+    AUTH_MODE: "access"
+  });
+  assert.equal(response.status, 200);
+  const { drawing } = await response.json();
+  assert.equal(JSON.stringify(drawing).includes("company.example"), false);
+  assert.equal(drawing.comments.at(-1).author, "user");
+  assert.equal(drawing.comments.at(-1).body, "確認お願いします(連絡先 [メールアドレス省略] / [メールアドレス省略] / [メールアドレス省略])");
+  assert.equal(drawing.auditLog.at(-1).actor, "user");
+  assert.equal(drawing.auditLog[0].actor, "system");
+  assert.equal(drawing.entities.find((entity) => entity.id === "e_pii_line").createdBy, "user");
+});

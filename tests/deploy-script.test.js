@@ -6,14 +6,19 @@ import { readFile } from "node:fs/promises";
 test("deploy-local.sh verifies the database read-only and never applies migrations or seeds", async () => {
   const script = await readFile(new URL("../scripts/deploy-local.sh", import.meta.url), "utf8");
   const commands = script.split("\n").filter((lineValue) => !lineValue.trim().startsWith("#"));
-  assert.ok(commands.some((lineValue) => lineValue.trim() === "npm run db:check"), "db:check must run during deploy");
+  assert.ok(commands.some((lineValue) => /npm run db:check/.test(lineValue)), "db:check must run during deploy");
   assert.ok(!commands.some((lineValue) => /db:verify|verify-database\.sh|seeds\/demo\.sql/.test(lineValue)), "deploy must not write to the production database");
-  // DB検証は再起動より前に行い、失敗時はERR trapでロールバックされる。
-  const check = commands.findIndex((lineValue) => lineValue.trim() === "npm run db:check");
-  // rollback()内にもrestartがあるため、本処理のrestart(最後の出現)と比較する。
-  const restart = commands.findLastIndex((lineValue) => lineValue.includes("systemctl restart mirai-web-cad.service"));
+  // DB検証は、稼働中の作業ツリーを切り替える(fast-forward・symlink)より前に行う。
+  const check = commands.findIndex((lineValue) => /npm run db:check/.test(lineValue));
+  const switchStart = commands.findIndex((lineValue) => lineValue.trim().startsWith("git merge --ff-only"));
   const trap = commands.findIndex((lineValue) => lineValue.trim() === "trap rollback ERR");
-  assert.ok(trap !== -1 && trap < check && check < restart);
+  assert.ok(check !== -1 && check < trap && trap < switchStart);
+  // 稼働中のツリーで依存導入やbuildをしない(独立レビュー H-1)。
+  const blockStart = commands.findIndex((lineValue) => lineValue.trim() === 'cd "$release_rel.tmp"');
+  const blockEnd = commands.findIndex((lineValue, index) => index > blockStart && lineValue.trim() === ")");
+  const installOrBuild = commands.map((lineValue, index) => (/\bnpm (ci|run build)\b/.test(lineValue) ? index : -1)).filter((index) => index !== -1);
+  assert.ok(blockStart !== -1 && installOrBuild.length > 0, "the release build block must exist");
+  assert.ok(installOrBuild.every((index) => index > blockStart && index < blockEnd), "npm ci/build must run only inside the release directory");
 });
 
 // 新しいmigrationを追加したのにdb:checkの検査を追加し忘れると、デプロイ時の検証が素通りする。
