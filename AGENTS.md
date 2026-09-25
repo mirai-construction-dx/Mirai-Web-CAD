@@ -1,7 +1,7 @@
 # AGENTS.md — Mirai-Web-CAD
 
 AIコーディングエージェント(Claude Code / Codex / OpenCode等)と開発者が、このリポジトリで作業するときの規約です。
-組織の上位方針(`/etc/claude-code/CLAUDE.md`、[GITHUB_POLICY.md](GITHUB_POLICY.md))と矛盾する場合は上位方針が優先します。
+組織の上位方針(`/etc/claude-code/CLAUDE.md`、組織の開発ガバナンス PORT-GOV-001)と矛盾する場合は上位方針が優先します。GitHubの運用(承認方式・必須チェック・禁止事項)は[GITHUB_POLICY.md](GITHUB_POLICY.md)(Mirai-Web-CAD版)に定めます。
 
 ## 1. このリポジトリの位置付け
 
