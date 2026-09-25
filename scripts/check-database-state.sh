@@ -19,10 +19,38 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 2
 fi
 
+# 本スクリプトが適用後状態を検証しているmigrationの一覧。migrations/に一覧外のファイルがあれば失敗する。
+# 新しいmigrationを追加するときは、その適用後状態(テーブル・列・制約・索引等)の検査を下へ追加し、
+# ここへファイル名を登録すること(tests/deploy-script.test.jsがCIでも同じ整合を検査する)。
+covered_migrations=(
+  0001_initial.sql
+  0002_idempotency.sql
+  0003_drawing_revision.sql
+  0004_drawing_visibility.sql
+  0005_audit_log_immutability.sql
+  0006_normalize_jsonb_columns.sql
+  0007_project_membership.sql
+  0008_audit_truncate_guard.sql
+)
+migrations_dir="$(dirname "$0")/../migrations"
+uncovered=""
+for file in "$migrations_dir"/*.sql; do
+  name="$(basename "$file")"
+  [[ " ${covered_migrations[*]} " == *" ${name} "* ]] || uncovered="${uncovered} ${name}"
+done
+if [[ -n "$uncovered" ]]; then
+  echo "database state check failed: db:checkが適用後状態を検証していないmigrationがあります:${uncovered}" >&2
+  echo "  → scripts/check-database-state.sh へ検査を追加し covered_migrations へ登録してください。" >&2
+  exit 1
+fi
+
 # migration 0001〜0007 が作るテーブル。欠落は「migration未適用」を意味する。
 expected_tables=(agent_runs audit_logs command_events drawing_versions drawings idempotency_keys project_members projects reviews)
 # migration 0003/0004/0007 が追加する列。
 expected_columns=("drawings:revision" "drawings:visibility" "projects:access_scope")
+# migration 0001/0004/0007 のCHECK制約と、0001/0002/0007 の索引。
+expected_constraints=(drawings_state_check drawing_versions_state_check command_events_source_check agent_runs_status_check reviews_status_check drawings_visibility_check projects_access_scope_check)
+expected_indexes=(idx_drawings_project_id idx_versions_drawing_id idx_command_events_version_id idx_agent_runs_version_id idx_audit_logs_target idx_idempotency_keys_created_at idx_project_members_member)
 
 missing_tables=""
 for table in "${expected_tables[@]}"; do
@@ -41,12 +69,29 @@ for entry in "${expected_columns[@]}"; do
   [[ "$present" == "1" ]] || missing_columns="${missing_columns} ${table}.${column}"
 done
 
-if [[ -n "$missing_tables" || -n "$missing_columns" ]]; then
+missing_constraints=""
+for constraint in "${expected_constraints[@]}"; do
+  present="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
+    select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace
+    where n.nspname = 'public' and c.conname = '${constraint}'
+  ")"
+  [[ "$present" == "1" ]] || missing_constraints="${missing_constraints} ${constraint}"
+done
+
+missing_indexes=""
+for index in "${expected_indexes[@]}"; do
+  present="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.${index}') is not null")"
+  [[ "$present" == "t" ]] || missing_indexes="${missing_indexes} ${index}"
+done
+
+if [[ -n "$missing_tables" || -n "$missing_columns" || -n "$missing_constraints" || -n "$missing_indexes" ]]; then
   echo "database state check failed: migrationが未適用です。" >&2
   [[ -n "$missing_tables" ]] && echo "  欠落テーブル:${missing_tables}" >&2
   [[ -n "$missing_columns" ]] && echo "  欠落列:${missing_columns}" >&2
-  echo "  → 先に 'DATABASE_URL=... npm run db:verify' を実行してmigrationを適用してください。" >&2
-  echo "     (db:verifyはseeds/demo.sqlも適用します。デモ行が不要な環境では適用範囲を確認してください)" >&2
+  [[ -n "$missing_constraints" ]] && echo "  欠落制約:${missing_constraints}" >&2
+  [[ -n "$missing_indexes" ]] && echo "  欠落索引:${missing_indexes}" >&2
+  echo "  → docs/deployment-local.md「Migrationを含むリリース」に従い、該当migrationを適用してください。" >&2
+  echo "     (本番DBへdb:verifyを実行しないこと。seeds/demo.sqlも適用され、デモ行の投入や既存行の上書きが起きます)" >&2
   exit 1
 fi
 
@@ -57,7 +102,7 @@ trigger_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
 ")"
 if [[ "$trigger_count" != "3" ]]; then
   echo "database state check failed: 監査ログの追記専用トリガが3件ではありません(found=${trigger_count}, expected=3)。" >&2
-  echo "  → 'DATABASE_URL=... npm run db:verify' でmigration 0005/0006/0008を適用してください。" >&2
+  echo "  → docs/deployment-local.md「Migrationを含むリリース」に従い、migration 0005/0006/0008を適用してください。" >&2
   exit 1
 fi
 
@@ -89,4 +134,4 @@ if [[ "$json_string_count" != "0" ]]; then
   exit 1
 fi
 
-echo "database state check ok: tables=${#expected_tables[@]} audit_triggers=${trigger_count} jsonb_strings=0"
+echo "database state check ok: migrations=${#covered_migrations[@]} tables=${#expected_tables[@]} constraints=${#expected_constraints[@]} indexes=${#expected_indexes[@]} audit_triggers=${trigger_count} jsonb_strings=0"

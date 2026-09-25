@@ -76,7 +76,7 @@ DATABASE_URL="postgresql://mirai_web_cad_app:...@127.0.0.1:5432/mirai_web_cad" n
 DATABASE_URL="postgresql://mirai_web_cad_app:...@127.0.0.1:5432/mirai_web_cad" npm run db:check
 ```
 
-`db:check`は**書き込みを一切行わず**、migration 0001〜0008が作る9テーブル、`drawings.revision`/`drawings.visibility`/`projects.access_scope`列、監査の追記専用トリガ**3件**(UPDATE/DELETE/TRUNCATE)と各操作の拒否(検査はROLLBACK)、JSONB string scalarが0件であることを確認します。未適用があれば欠落を列挙して**終了コード1**で失敗します。
+`db:check`は**書き込みを一切行わず**、`covered_migrations`に登録したmigration(0001〜0008)の適用後状態として列挙した9テーブル、`drawings.revision`/`drawings.visibility`/`projects.access_scope`列、CHECK制約7件、索引7件、監査の追記専用トリガ**3件**(UPDATE/DELETE/TRUNCATE)と各操作の拒否(検査はROLLBACK)、JSONB string scalarが0件であることを確認します。未適用があれば欠落を列挙して**終了コード1**で失敗します。
 
 実測(2026-09-18): migration適用済DBで`db:check`実行前後の行数と`content_hash`のmd5が完全一致(書き込みゼロ)。空DBでは欠落テーブル・列を列挙してexit 1。
 

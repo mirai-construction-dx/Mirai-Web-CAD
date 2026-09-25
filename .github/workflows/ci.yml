@@ -89,6 +89,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: npm run db:verify
+      # デプロイ経路が使う読み取り専用検査が、migration適用直後のDBで成立することを確認する。
+      - run: npm run db:check
 
   postgres-integration:
     name: PostgreSQL Data Store Integration

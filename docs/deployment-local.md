@@ -191,12 +191,22 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
 
 #### Migrationを含むリリース
 
-`db:check`はmigrationを適用しない。新しいmigrationを含むリリースでは、未適用のままデプロイすると`db:check`が欠落を列挙してexit 1となり、デプロイは直前のコミットへ自動ロールバックされる。次の順で適用してからデプロイする。
+`db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、CHECK制約7、索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
+
+新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、直前のコミットへ自動ロールバックされる。
+
+**本番DBへ`db:verify`を実行してはならない**(全migrationに加えて`seeds/demo.sql`を適用し、デモ行の投入・`dwg_demo_001`の上書き・監査トリガの再作成が起きる)。次の順で、対象migrationだけを適用してからデプロイする。
 
 1. 事前バックアップを取得する(「バックアップ」節)
-2. 検証用DBで`db:verify`を実行し、migrationが冪等に適用できることを確認する
-3. 本番DBへ該当migrationを適用する(監査ログの所有権分離後は所有者ロールまたは管理者で実行。[運用・復旧メモ](operations.md)参照)
-4. `db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
+2. 検証用DB(本番の復元コピー等)で対象migrationを適用し、続けて`db:check`が成功することを確認する
+3. 本番DBへ**対象migrationファイルだけ**を単一トランザクションで適用する。監査ログの所有権分離後は所有者ロールまたは管理者の接続文字列で実行する([運用・復旧メモ](operations.md)参照)
+
+   ```bash
+   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f migrations/0009_example.sql
+   ```
+
+   `MIGRATION_DATABASE_URL`は所有者ロール等の接続文字列(`production.env`とは別に安全に管理し、リポジトリへ置かない)。
+4. `DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 
