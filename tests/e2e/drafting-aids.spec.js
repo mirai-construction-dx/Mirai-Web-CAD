@@ -15,8 +15,19 @@ const command = async (page, value) => {
   await page.locator("#commandInput").press("Enter");
 };
 const lastEntity = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-mvp")).entities.at(-1));
-// 起動時の既定カメラ(x=50, y=40, 縮尺0.075)で図面座標をCanvas座標へ変換する。
-const toCanvas = (x, y) => ({ x: 50 + x * 0.075, y: 40 + y * 0.075 });
+// 図面座標→Canvas座標の対応を、実際のカーソル座標表示から測る(起動時の自動fitの有無や
+// Canvas寸法に依存しない)。選択ツール・OSnap無効の状態で呼ぶこと(座標が吸着しない)。
+async function calibrate(page) {
+  const canvas = page.locator("#cadCanvas");
+  const read = async (x, y) => {
+    await canvas.hover({ position: { x, y } });
+    return (await page.locator("#coordReadout").textContent()).split(",").map((value) => Number(value.trim()));
+  };
+  const [x0, y0] = await read(20, 20);
+  const [x1] = await read(120, 20);
+  const scale = 100 / (x1 - x0);
+  return (x, y) => ({ x: 20 + (x - x0) * scale, y: 20 + (y - y0) * scale });
+}
 
 test("F3/F7/F8/F9 toggle drafting aids, but not while a dialog is open", async ({ page }) => {
   const toggle = (name) => page.locator(".status-toggle", { hasText: name });
@@ -52,6 +63,7 @@ test("a leading @ continues from the last entered point", async ({ page }) => {
 });
 
 test("typing a distance while drawing places the point toward the cursor", async ({ page }) => {
+  const toCanvas = await calibrate(page);
   await command(page, "LINE");
   const canvas = page.locator("#cadCanvas");
   const start = toCanvas(1000, 1000);
@@ -67,6 +79,7 @@ test("typing a distance while drawing places the point toward the cursor", async
 });
 
 test("tangent OSnap snaps the second point to the tangent point on a circle", async ({ page }) => {
+  const toCanvas = await calibrate(page);
   await page.getByRole("button", { name: "システム設定" }).click();
   await page.getByLabel("図形スナップ（OSnap）").check();
   await page.getByRole("checkbox", { name: "接線" }).check();
