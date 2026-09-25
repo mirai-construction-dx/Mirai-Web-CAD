@@ -10,7 +10,7 @@ StartLimitBurst=5
 Type=simple
 User=kensan
 Group=kensan
-WorkingDirectory=/home/kensan/Projects/Mirai-DX-Project/Mirai-Web-CAD
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 EnvironmentFile=/home/kensan/.config/mirai-web-cad/production.env
 Environment=PORT=18812
 Environment=NODE_ENV=production

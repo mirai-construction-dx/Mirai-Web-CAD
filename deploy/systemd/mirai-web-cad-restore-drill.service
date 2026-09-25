@@ -10,7 +10,7 @@ Type=oneshot
 User=kensan
 Group=kensan
 # WorkingDirectory は本番ホストのチェックアウト先。他の mirai-web-cad-* unit と必ず揃えること。
-WorkingDirectory=/home/kensan/Projects/Mirai-DX-Project/Mirai-Web-CAD
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 # backup.env には DATABASE_URL と RESTORE_DATABASE_URL の両方が必要。
 # RESTORE_DATABASE_URL は隔離された復元専用DB(mirai_web_cad_recovery)を指し、
 # 本番DBと同一であってはならない(restore-drill-local.shが拒否する)。

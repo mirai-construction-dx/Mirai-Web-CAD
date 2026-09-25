@@ -5,7 +5,7 @@ Description=Mirai Web CAD MVP backup freshness check
 Type=oneshot
 User=kensan
 Group=kensan
-WorkingDirectory=/home/kensan/Projects/Mirai-DX-Project/Mirai-Web-CAD
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 Environment=BACKUP_DIR=/var/backups/mirai-web-cad/mvp-postgres
 Environment=MAX_AGE_HOURS=36
 ExecStart=/usr/bin/bash scripts/check-backup-freshness.sh

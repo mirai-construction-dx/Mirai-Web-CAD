@@ -8,7 +8,7 @@ Requires=postgresql.service
 Type=oneshot
 User=kensan
 Group=kensan
-WorkingDirectory=/home/kensan/Projects/Mirai-DX-Project/Mirai-Web-CAD
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 EnvironmentFile=/home/kensan/.config/mirai-web-cad/mvp.env
 Environment=LOCAL_URL=http://127.0.0.1:18813
 Environment=PUBLIC_URL=https://mirai-web-cad-mvp.mirai-dx-platform.com
