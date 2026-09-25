@@ -188,3 +188,46 @@ export function boundsIntersectView(bounds, camera, viewport) {
 export function keepCenterOnResize(camera, from, to) {
   return { x: camera.x + (to.width - from.width) / 2, y: camera.y + (to.height - from.height) / 2, scale: camera.scale };
 }
+
+/** ZOOM Pで戻れる表示の履歴件数。 */
+export const VIEW_HISTORY_LIMIT = 20;
+
+/**
+ * 2点で囲んだ範囲がCanvas全体に収まるカメラ(ZOOM Window)。範囲の中心を画面中央に置く。
+ * @param {{ x: number, y: number }} a
+ * @param {{ x: number, y: number }} b
+ * @param {{ width: number, height: number }} viewport
+ */
+export function cameraForWindow(a, b, viewport) {
+  const width = Math.abs(b.x - a.x);
+  const height = Math.abs(b.y - a.y);
+  // 極端な座標では差が無限大に溢れ、縮尺0・座標NaNのカメラになるため適用前に拒否する。
+  if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error("窓ズームの範囲が大きすぎます。");
+  if (!(width > 0) && !(height > 0)) throw new Error("窓ズームの2点が同じです。範囲を指定してください。");
+  const fit = Math.min(width > 0 ? viewport.width / width : Infinity, height > 0 ? viewport.height / height : Infinity);
+  const scale = Math.min(CAMERA_MAX_SCALE, fit);
+  const camera = {
+    x: viewport.width / 2 - ((a.x + b.x) / 2) * scale,
+    y: viewport.height / 2 - ((a.y + b.y) / 2) * scale,
+    scale
+  };
+  if (!(scale > 0) || !Number.isFinite(camera.x) || !Number.isFinite(camera.y)) throw new Error("窓ズームの範囲を表示できません。");
+  return camera;
+}
+
+/** 画面中心を保って縮尺をfactor倍にしたカメラ(ZOOM nX)。操作用の縮尺範囲へ丸める。 */
+export function zoomCameraAtCenter(camera, factor, viewport) {
+  // 巨大な倍率で積が無限大へ溢れると、clampが最小縮尺を選び拡大が縮小になるため上限で飽和させる。
+  const product = camera.scale * factor;
+  const scale = clampCameraScale(Number.isFinite(product) ? product : CAMERA_MAX_SCALE, camera.scale);
+  const centerX = (viewport.width / 2 - camera.x) / camera.scale;
+  const centerY = (viewport.height / 2 - camera.y) / camera.scale;
+  return { x: viewport.width / 2 - centerX * scale, y: viewport.height / 2 - centerY * scale, scale };
+}
+
+/** 表示履歴へ現在のカメラを積む(直前と同じ表示は積まない)。上限を超えた古い履歴は捨てる。 */
+export function pushViewHistory(history, camera, limit = VIEW_HISTORY_LIMIT) {
+  const last = history[history.length - 1];
+  if (last && last.x === camera.x && last.y === camera.y && last.scale === camera.scale) return history;
+  return [...history, { x: camera.x, y: camera.y, scale: camera.scale }].slice(-limit);
+}

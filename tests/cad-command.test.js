@@ -211,3 +211,25 @@ test("command line accepts polar coordinates as point arguments and rejects ambi
   const moved = parseCadCommand("MOVE 100<0", context({ drawing, selectedId }));
   assert.deepEqual(moved.commands[0].id, selectedId);
 });
+
+test("ZOOM supports extents, window, previous and scale factor", () => {
+  const ui = (value) => parseCadCommand(value, context());
+  assert.deepEqual(ui("ZOOM"), { kind: "ui", action: "fit" });
+  assert.deepEqual(ui("Z E"), { kind: "ui", action: "fit" });
+  assert.deepEqual(ui("ZOOM P"), { kind: "ui", action: "zoomPrevious" });
+  assert.deepEqual(ui("ZOOM PREVIOUS"), { kind: "ui", action: "zoomPrevious" });
+  assert.deepEqual(ui("ZOOM W"), { kind: "ui", action: "tool", tool: "zoomwindow" });
+  assert.deepEqual(ui("ZOOM W 0,0 1000,500"), { kind: "ui", action: "zoomWindow", corners: [{ x: 0, y: 0 }, { x: 1000, y: 500 }] });
+  assert.deepEqual(ui("ZOOM 100,200 300,400"), { kind: "ui", action: "zoomWindow", corners: [{ x: 100, y: 200 }, { x: 300, y: 400 }] });
+  assert.deepEqual(ui("ZOOM 2X"), { kind: "ui", action: "zoomFactor", factor: 2 });
+  assert.deepEqual(ui("zoom 0.5x"), { kind: "ui", action: "zoomFactor", factor: 0.5 });
+  assert.deepEqual(ui("ZOOM .25X"), { kind: "ui", action: "zoomFactor", factor: 0.25 });
+  assert.throws(() => ui("ZOOM 0X"), /0より大きい/);
+  assert.throws(() => ui("ZOOM 2"), /E\(全体\) \/ W\(窓\) \/ P\(前画面\)/);
+  assert.throws(() => ui("ZOOM W 0,0"), /形式: ZOOM W/);
+  assert.throws(() => ui("ZOOM Q"), /E\(全体\)/);
+  // 余分な引数・無限大の倍率は表示を変えずに拒否する。
+  assert.throws(() => ui("ZOOM P 2X"), /形式: ZOOM P/);
+  assert.throws(() => ui("ZOOM E unexpected"), /形式: ZOOM E/);
+  assert.throws(() => ui(`ZOOM ${"9".repeat(400)}X`), /有限/);
+});
