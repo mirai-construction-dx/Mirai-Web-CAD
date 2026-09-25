@@ -239,6 +239,38 @@ sudo systemctl start mirai-web-cad-backup-check.service
 journalctl -u mirai-web-cad-backup.service -n 20
 ```
 
+### オフサイト転送と失敗通知(独立レビュー H-3)
+
+同じホストのディスクだけでは、ホストの故障・盗難・誤削除で本番DBとバックアップを同時に失う。`mirai-web-cad-offsite-backup.timer`が毎日05:00(JST、最大10分のランダム遅延)に`scripts/offsite-backup.sh`を実行し、本番とMVPの最新dump(manifestを含む)を**ageで暗号化してから**Cloudflare R2の`mirai-web-cad-backups`へ転送する(`production/`・`mvp/`)。転送後はリモートのサイズを照合し、最新dumpが36時間より古い場合は転送せずに失敗する。決定事項と初期値は[外部入力・確定待ち台帳](external-input-status.md)§5。
+
+バックアップ・鮮度検査・復元ドリル・オフサイト転送の各ユニットは、失敗すると`OnFailure=`で`mirai-web-cad-notify-failure@<ユニット名>.service`を起動する。これはBot名義で「[運用通知] <ユニット名> が失敗しました」のIssueを作り、未解決の同じIssueがあればコメントを追記する(本文はユニット名・時刻・systemdの結果だけで、ログは載せない)。原因を解消して再実行が成功したらIssueを閉じる。
+
+初回セットアップ(本番のsecret追加とsystemd設定の変更を含むため、オーナーのY/N後に行う):
+
+1. R2 bucketとライフサイクルルールを作る: `wrangler r2 bucket create mirai-web-cad-backups`、`wrangler r2 bucket lifecycle add mirai-web-cad-backups expire-90d --expire-days 90`
+2. Cloudflareダッシュボードで、このbucketだけを対象にしたR2 API token(Object Read & Write)を作る。
+3. `~/.config/mirai-web-cad/offsite.env`(mode 0600)へ次の変数を書く。値はGit・ログ・チャットへ出さない。
+   ```
+   RCLONE_CONFIG_R2_TYPE=s3
+   RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+   RCLONE_CONFIG_R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+   RCLONE_CONFIG_R2_ACCESS_KEY_ID=<token のアクセスキーID>
+   RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=<token のシークレット>
+   RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+   ```
+4. age鍵を作り、**復号鍵をホストから外す**: `age-keygen -o /tmp/mirai-offsite.key`の後、`age-keygen -y /tmp/mirai-offsite.key > ~/.config/mirai-web-cad/offsite-age-recipients.txt`で公開鍵を置き、`/tmp/mirai-offsite.key`はオーナーがパスワードマネージャー等へ移して`shred -u`で消す。受信者ファイルに復号鍵(`AGE-SECRET-KEY`)が含まれていると転送は失敗する。
+5. ユニットを配置する(「4. systemdユニット配置」と同じ手順): `mirai-web-cad-offsite-backup.service`・`.timer`、`mirai-web-cad-notify-failure@.service`、および`OnFailure=`を加えた既存のバックアップ・鮮度検査・復元ドリルのユニット。`sudo systemctl daemon-reload`の後、`sudo systemctl enable --now mirai-web-cad-offsite-backup.timer`。
+6. 試験: `sudo systemctl start mirai-web-cad-offsite-backup.service`が成功し、R2に両方のファイルがあること。`sudo systemctl start mirai-web-cad-notify-failure@mirai-web-cad-offsite-backup.service.service`で通知Issueが作られること(確認後に閉じる)。
+
+オフサイトからの復元(隔離DBへ):
+
+```bash
+rclone copyto r2:mirai-web-cad-backups/production/<name>.dump.tar.age ./<name>.dump.tar.age   # offsite.env の変数を渡して実行
+age -d -i <オーナーが保管する復号鍵> <name>.dump.tar.age | tar -x          # <name>.dump と .manifest が出る
+RESTORE_DATABASE_URL=<隔離DB> BACKUP_FILE=./<name>.dump ALLOW_DATABASE_RESTORE=yes MAX_BACKUP_AGE_HOURS=<経過時間> \
+  bash scripts/restore-database.sh
+```
+
 ### 本番DBの復元ドリル(初回セットアップが必要)
 
 MVPは隔離DBへの復元ドリルを週次で実行しているが、**本番DBには同等の自動ドリルが無い**(2026-09-18時点)。`deploy/systemd/mirai-web-cad-restore-drill.service`と`.timer`(日曜04:10 JST)を追加したので、初回のみ次の準備を行えば以降は自動化される。

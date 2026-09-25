@@ -1,0 +1,30 @@
+[Unit]
+Description=Mirai Web CAD failure notification (GitHub Issue) for %i
+Documentation=https://github.com/mirai-construction-dx/Mirai-Web-CAD/blob/main/docs/deployment-local.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kensan
+Group=kensan
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
+# Botのトークンを1変数だけ読む(引数・ログへは出さない)。通知先はこのリポジトリのIssue。
+Environment=NOTIFY_TOKEN_FILE=/home/kensan/.config/codip/bot.env
+Environment=NOTIFY_TOKEN_VARIABLE=MIRAI_BOT_TOKEN
+Environment=NOTIFY_REPO=mirai-construction-dx/Mirai-Web-CAD
+Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v22.22.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node scripts/notify-failure.mjs %i
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+UMask=0077

@@ -1,0 +1,11 @@
+[Unit]
+Description=Mirai Web CAD daily encrypted offsite backup transfer timer
+
+[Timer]
+# 本番(03:10+最大30分)とMVP(03:40+最大20分)の日次バックアップの後に転送する。
+OnCalendar=*-*-* 05:00:00 Asia/Tokyo
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
