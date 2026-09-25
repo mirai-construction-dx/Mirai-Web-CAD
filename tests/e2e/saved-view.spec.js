@@ -51,3 +51,21 @@ test("a saved view that no longer shows the drawing falls back to ZOOM EXTENTS",
   expect(Math.abs(x - 10000)).toBeLessThan(1500);
   expect(Math.abs(y - 4500)).toBeLessThan(1500);
 });
+
+test("resizing the canvas keeps the drawing point at the view center", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "desktop viewport resize");
+  await command(page, "ZOOM E");
+  const centerOf = async () => {
+    const box = await page.locator("#cadCanvas").boundingBox();
+    return (await cursorWorld(page, box.width / 2, box.height / 2)).split(",").map((value) => Number(value.trim()));
+  };
+  const before = await centerOf();
+  // window resizeを伴わないレイアウト変化(ドック幅)でも中心を保つ。
+  await page.evaluate(() => document.querySelector(".workspace").style.setProperty("--dock-width", "480px"));
+  await expect.poll(async () => (await page.locator("#cadCanvas").evaluate((element) => element.clientWidth))).toBeLessThan(900);
+  const after = await centerOf();
+  const scale = await page.locator(".zoom-readout").textContent();
+  const tolerance = 2 / (Number.parseFloat(scale) / 1000);
+  expect(Math.abs(after[0] - before[0])).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(after[1] - before[1])).toBeLessThanOrEqual(tolerance);
+});

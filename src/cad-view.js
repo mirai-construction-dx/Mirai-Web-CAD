@@ -180,3 +180,11 @@ export function boundsIntersectView(bounds, camera, viewport) {
     return right >= 0 && bottom >= 0 && left <= viewport.width && top <= viewport.height;
   });
 }
+
+/**
+ * Canvasの表示寸法が変わったとき、画面中心が指す図面座標と縮尺を保つカメラを返す
+ * (ドック幅の変更・フォント読込によるレイアウト変化・画面回転などで表示が片寄らないようにする)。
+ */
+export function keepCenterOnResize(camera, from, to) {
+  return { x: camera.x + (to.width - from.width) / 2, y: camera.y + (to.height - from.height) / 2, scale: camera.scale };
+}

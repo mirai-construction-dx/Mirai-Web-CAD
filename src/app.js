@@ -27,7 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
-import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, canvasViewSize, parseSavedViews, rememberSavedView, savedViewToCamera, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
+import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, canvasViewSize, keepCenterOnResize, parseSavedViews, rememberSavedView, savedViewToCamera, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -492,6 +492,7 @@ function render() {
   /** @type {HTMLElement} */ (document.querySelector(".workspace")).style.setProperty("--dock-width", `${state.settings.dockWidth}px`);
   if (state.space === "layout") applyLayoutGeometry(activeLayoutDrawing(drawing));
   bindEvents();
+  observeCanvasResize();
   try {
     drawCanvas();
   } catch (error) {
@@ -1579,6 +1580,27 @@ function updateZoomReadouts() {
   if (scale && state.space !== "layout") scale.textContent = `縮尺 ${text}`;
 }
 
+/** 直前の描画時のCanvas表示寸法。寸法変化時に画面中心を保つために使う。 */
+/** @type {{ width: number, height: number } | null} */
+let lastCanvasView = null;
+/** @type {ResizeObserver | null} */
+let canvasResizeObserver = null;
+
+// windowのresize以外(ドック幅・フォント読込・画面回転)でCanvasの表示寸法が変わっても追従する。
+// renderごとにCanvasは作り直されるため監視対象を付け替え、寸法が実際に変わったときだけ再描画する。
+function observeCanvasResize() {
+  if (typeof ResizeObserver === "undefined") return;
+  const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
+  canvasResizeObserver ??= new ResizeObserver(() => {
+    const current = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
+    if (!current || !lastCanvasView) return;
+    const view = canvasViewSize(current);
+    if (view.width !== lastCanvasView.width || view.height !== lastCanvasView.height) drawCanvas();
+  });
+  canvasResizeObserver.disconnect();
+  if (canvas) canvasResizeObserver.observe(canvas);
+}
+
 /** @type {{ drawingId: string, view: { cx: number, cy: number, scale: number } } | null} */
 let pendingViewSave = null;
 let viewSaveTimer = 0;
@@ -2474,6 +2496,10 @@ function drawCanvas(pointerWorld = null) {
   const drawing = activeDrawing();
   syncCanvasBackingSize(canvas, window.devicePixelRatio);
   const view = canvasViewSize(canvas);
+  if (lastCanvasView && (lastCanvasView.width !== view.width || lastCanvasView.height !== view.height)) {
+    state.camera = keepCenterOnResize(state.camera, lastCanvasView, view);
+  }
+  lastCanvasView = view;
   if (state.fitPending || state.outOfViewFitPending) {
     const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
     const saved = state.fitPending ? null : loadSavedViews()[state.drawing.id];

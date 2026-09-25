@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, parseSavedViews, rememberSavedView, SAVED_VIEW_LIMIT, savedViewToCamera, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
+import { keepCenterOnResize, boundsIntersectView, boundsVisibleInView, cameraToSavedView, parseSavedViews, rememberSavedView, SAVED_VIEW_LIMIT, savedViewToCamera, CAMERA_MAX_SCALE, CAMERA_MIN_SCALE, canvasViewSize, clampCameraScale, displayGridStep, MIN_GRID_STEP_PX, FIT_MARGIN, FIT_MAX_SCALE, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "../src/cad-view.js";
 
 const toScreen = (camera, x, y) => ({ x: camera.x + x * camera.scale, y: camera.y + y * camera.scale });
 
@@ -134,4 +134,15 @@ test("a saved view is only restored when it still shows part of the drawing", ()
   assert.equal(boundsIntersectView([{ minX: 90, minY: 90, maxX: 200, maxY: 200 }], camera, viewport), true);
   assert.equal(boundsIntersectView([{ minX: 101, minY: 0, maxX: 200, maxY: 50 }], camera, viewport), false);
   assert.equal(boundsIntersectView([], camera, viewport), false);
+});
+
+test("canvas resize keeps the world point at the view center", () => {
+  const camera = { x: 100, y: 50, scale: 0.2 };
+  const from = { width: 800, height: 400 };
+  const to = { width: 600, height: 700 };
+  const next = keepCenterOnResize(camera, from, to);
+  const centerBefore = { x: (from.width / 2 - camera.x) / camera.scale, y: (from.height / 2 - camera.y) / camera.scale };
+  const centerAfter = { x: (to.width / 2 - next.x) / next.scale, y: (to.height / 2 - next.y) / next.scale };
+  assert.deepEqual(centerAfter, centerBefore);
+  assert.equal(next.scale, camera.scale);
 });
