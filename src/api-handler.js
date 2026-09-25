@@ -281,12 +281,14 @@ export async function handleApiRequest(request, env = {}) {
       await rejectClaimedIdempotency(store, idempotencyKey);
       await readJson(request);
       const run = await getAgentRun(store, approveAgentMatch[1]);
+      // 図面の権限を先に確かめる。後にすると、権限のない利用者が409と404の違いから
+      // 「その提案が適用済みか」を知り得る。
+      await requireDrawingAccess(store, actor.actor, run.drawingId);
       // 承認で変わるのは run.status だけのため、それも見ないと同じ提案を何度でも適用できた
       // (独立レビュー M-2)。同時の承認はDB側の条件(status='planned')で1件に絞る。
       if (run.status !== "planned" || run.proposal.status !== "planned") {
         return json({ ok: false, error: "適用可能なAI提案ではありません。" }, 409, cors);
       }
-      await requireDrawingAccess(store, actor.actor, run.drawingId);
       const drawing = withActor(await getDrawing(store, run.drawingId), actor.actor);
       requireExpectedVersion(request, drawing);
       const result = applyTransaction(drawing, proposalToTransaction(run.proposal, actor.actor.id));

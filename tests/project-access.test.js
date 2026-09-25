@@ -192,3 +192,36 @@ test("creating a drawing against an unknown project is rejected", async () => {
   });
   assert.equal(response.status, 404);
 });
+
+test("a non-member cannot learn whether an agent run on a restricted drawing was applied", async () => {
+  resetMemoryStore();
+  assert.equal((await request("/projects", {
+    method: "POST",
+    role: "cad_admin",
+    idempotencyKey: "proj-agent-1",
+    body: { id: "prj_agent", name: "秘匿案件", accessScope: "restricted" }
+  })).status, 201);
+  const created = await request("/drawings", {
+    method: "POST",
+    role: "cad_admin",
+    idempotencyKey: "dwg-agent-1",
+    body: { name: "秘匿図面", projectId: "prj_agent", template: "demo" }
+  });
+  assert.equal(created.status, 201);
+  const drawing = (await created.json()).drawing;
+  const plan = await request(`/drawings/${drawing.id}/agent-runs`, {
+    method: "POST",
+    role: "cad_admin",
+    body: { prompt: "クレーンの重機範囲を追加" }
+  });
+  assert.equal(plan.status, 201);
+  const run = (await plan.json()).run;
+  const approve = (role, actorId, key, version) =>
+    request(`/agent-runs/${run.id}/approve`, { method: "POST", role, actorId, idempotencyKey: key, expectedVersion: version, body: {} });
+  const applied = await approve("cad_admin", "admin@example.com", "agent-apply-1", drawing.revision);
+  assert.equal(applied.status, 200);
+
+  // 適用済みでも未適用でも、権限のない利用者には同じ404を返す。
+  const outsider = await approve("drafter", "outsider@example.com", "agent-apply-2", (await applied.json()).drawing.revision);
+  assert.equal(outsider.status, 404);
+});
