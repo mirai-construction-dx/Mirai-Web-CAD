@@ -5,6 +5,8 @@ import { findMalformedHeaderLines } from "./lib/http-bridge.mjs";
 
 const root = process.cwd();
 const required = [
+  "AGENTS.md",
+  "CLAUDE.md",
   "index.html",
   "src/app.js",
   "src/cad-core.js",
