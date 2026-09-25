@@ -272,10 +272,15 @@ journalctl -u mirai-web-cad-cloudflared.service -f
 
 オーナー不在時(承認必須のためmainを戻せない場合)は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md)に従う。
 
+`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、**稼働中のツリーで`npm ci`・`npm run build`を実行せず**、向き先を直前のリリースへ戻す(`.releases/`に無い場合だけ別ディレクトリでbuildしてから切り替える)。
+
 ```bash
-git checkout <直前の正常コミットSHA>
-npm ci && npm run build
-sudo systemctl restart mirai-web-cad.service
+prev=<直前の正常コミットSHA>
+rel=.releases/$prev               # 初回切替時に退避した分は .releases/legacy-$prev
+git checkout --quiet "$prev"
+ln -sfn "$rel/node_modules" .swap-node_modules && mv -Tf .swap-node_modules node_modules
+ln -sfn "$rel/dist" .swap-dist && mv -Tf .swap-dist dist
+sudo systemctl restart mirai-web-cad.service mirai-web-cad-mvp.service
 ```
 
 Cloudflare Tunnel/DNSに問題がある場合は、Cloudflare Pages Custom Domainを再アタッチする(Pagesプロジェクト・`functions/`・`wrangler.toml`はロールバック手段として当面残置している)。
