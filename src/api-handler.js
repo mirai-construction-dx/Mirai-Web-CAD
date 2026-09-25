@@ -281,7 +281,9 @@ export async function handleApiRequest(request, env = {}) {
       await rejectClaimedIdempotency(store, idempotencyKey);
       await readJson(request);
       const run = await getAgentRun(store, approveAgentMatch[1]);
-      if (run.proposal.status !== "planned") {
+      // 承認で変わるのは run.status だけのため、それも見ないと同じ提案を何度でも適用できた
+      // (独立レビュー M-2)。同時の承認はDB側の条件(status='planned')で1件に絞る。
+      if (run.status !== "planned" || run.proposal.status !== "planned") {
         return json({ ok: false, error: "適用可能なAI提案ではありません。" }, 409, cors);
       }
       await requireDrawingAccess(store, actor.actor, run.drawingId);
