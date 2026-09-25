@@ -701,7 +701,9 @@ async function getPublicDrawing(store, id) {
 // メールアドレスも伏せる。
 const PUBLIC_ACTOR_LABELS = new Set(["system", "agent", "user", ...Object.keys(ROLE_POLICIES)]);
 const IDENTITY_KEYS = new Set(["actor", "author", "createdBy"]);
-const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+// 日本語等を含むアドレス(太郎@example.com、taro@例子.公司)も対象にする。空白なしで続く
+// 前後の文字まで伏せることがあるが、公開応答では伏せすぎを許容する。
+const EMAIL_PATTERN = /[\p{L}\p{N}\p{M}._%+-]+@[\p{L}\p{N}\p{M}-]+(?:\.[\p{L}\p{N}\p{M}-]+)+/gu;
 const REDACTED_EMAIL = "[メールアドレス省略]";
 
 function publicActor(value) {
