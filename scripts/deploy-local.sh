@@ -12,8 +12,9 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-prev_sha="$(git rev-parse HEAD)"
-echo "現在のHEAD: $prev_sha"
+# 再実行時(下記)は、更新前に記録したロールバック先を引き継ぐ。
+prev_sha="${DEPLOY_PREV_SHA:-$(git rev-parse HEAD)}"
+echo "現在のHEAD: $(git rev-parse HEAD) (ロールバック先: ${prev_sha})"
 
 git fetch --prune origin
 if ! git merge --ff-only origin/main; then
@@ -22,6 +23,14 @@ if ! git merge --ff-only origin/main; then
 fi
 new_sha="$(git rev-parse HEAD)"
 echo "デプロイ対象: $new_sha"
+
+# bashは起動時点のスクリプトを実行し続けるため、今回のfast-forwardでこのスクリプト自体が
+# 変わった場合は、新しい手順で最初からやり直す(2026-09-25、db:check切替の初回デプロイで
+# 旧手順のdb:verifyが走った事故の再発防止)。再実行は1回だけ。
+if [[ "${DEPLOY_REEXECUTED:-}" != "1" ]] && ! git diff --quiet "$prev_sha" "$new_sha" -- scripts/deploy-local.sh; then
+  echo "デプロイ手順(scripts/deploy-local.sh)が更新されたため、新しい手順で再実行します。"
+  DEPLOY_REEXECUTED=1 DEPLOY_PREV_SHA="$prev_sha" exec bash scripts/deploy-local.sh
+fi
 
 rollback() {
   echo "デプロイに失敗しました。${prev_sha} へロールバックします。" >&2

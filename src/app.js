@@ -1083,6 +1083,7 @@ function bindEvents() {
   document.querySelector("#quickPrintBtn").addEventListener("click", goLayoutSpace);
   document.querySelector("#resetBtn").addEventListener("click", () => {
     clearDrawing();
+    drawingEpoch += 1;
     state.drawing = seedDrawing();
     resetAuthoringState();
     fitCameraToDrawing();
@@ -1425,6 +1426,7 @@ async function createNewDrawingFromForm(event) {
   const unit = String(data.get("unit") ?? "mm");
   const template = String(data.get("template") ?? "blank");
   const role = state.drawing.currentRole;
+  drawingEpoch += 1;
   try {
     if (state.apiStatus.connected) {
       const body = await apiRequest("/api/drawings", {
@@ -1644,6 +1646,17 @@ function flushViewSave() {
   } catch {
     // 保存できない環境(プライベートモード等)では表示位置を記憶しないだけにする。
   }
+}
+
+/** 図面の切替(デモ初期化・新規作成・APIからの別図面読込)ごとに進む世代。 */
+let drawingEpoch = 0;
+
+// API応答を待つ間に別の図面へ切り替わっていたら、古い図面向けの応答を今の図面へ適用しない。
+function isStaleDrawingResponse(epoch, label) {
+  if (epoch === drawingEpoch) return false;
+  log(`${label}: 応答待ちの間に図面が切り替わったため、結果を破棄しました`);
+  render();
+  return true;
 }
 
 function fitCameraToDrawing() {
@@ -1938,16 +1951,19 @@ async function changeReviewState(action) {
     render();
     return;
   }
+  const epoch = drawingEpoch;
   try {
     const body = await apiRequest(`/api/drawings/${state.drawing.id}/review`, {
       method: "POST",
       headers: transactionHeaders(),
       body: JSON.stringify({ action })
     });
+    if (isStaleDrawingResponse(epoch, "レビュー操作")) return;
     state.drawing = body.drawing;
     state.saveStatus = "synced";
     persist({ submit: "レビュー提出", approve: "承認完了", new_version: "新版作成" }[action]);
   } catch (error) {
+    if (isStaleDrawingResponse(epoch, "レビュー操作")) return;
     state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
     log(`API操作失敗: ${errorMessage(error)}`);
     render();
@@ -2394,11 +2410,16 @@ async function planAiProposal() {
   state.aiError = null;
   render();
   if (state.apiStatus.connected) {
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(`/api/drawings/${state.drawing.id}/agent-runs`, {
         method: "POST",
         body: JSON.stringify({ prompt: promptValue })
       });
+      if (isStaleDrawingResponse(epoch, "AI Preview")) {
+        state.aiBusy = false;
+        return;
+      }
       state.previewProposal = body.run.proposal;
       state.previewRunId = body.run.id;
       state.aiEngine = body.run.proposal?.engine ?? "rule";
@@ -2428,18 +2449,21 @@ async function applyAiProposal() {
   }
 
   if (state.apiStatus.connected && state.previewRunId) {
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(`/api/agent-runs/${state.previewRunId}/approve`, {
         method: "POST",
         headers: transactionHeaders(),
         body: JSON.stringify({ drawingId: state.drawing.id, proposal: state.previewProposal })
       });
+      if (isStaleDrawingResponse(epoch, "AI適用")) return;
       state.drawing = body.drawing;
       state.saveStatus = "synced";
       state.previewProposal = null;
       state.previewRunId = null;
       persist("AI提案を承認適用 / サーバー同期");
     } catch (error) {
+      if (isStaleDrawingResponse(epoch, "AI適用")) return;
       state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
       log(`AI適用失敗: ${errorMessage(error)}`);
       render();
@@ -2465,18 +2489,21 @@ async function commitCommands(label, commands, options = {}) {
   const requestBody = options.body ?? { label, commands };
   if (state.apiStatus.connected) {
     state.saveStatus = "syncing";
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(path, {
         method: "POST",
         headers: transactionHeaders(),
         body: JSON.stringify(requestBody)
       });
+      if (isStaleDrawingResponse(epoch, label)) return false;
       state.drawing = body.drawing;
       state.saveStatus = "synced";
       recordDrawingHistory(before, options);
       persist(`${label} / サーバー同期`);
       return true;
     } catch (error) {
+      if (isStaleDrawingResponse(epoch, label)) return false;
       state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
       log(`${label}失敗: ${errorMessage(error)}`);
       render();
@@ -2918,7 +2945,11 @@ async function checkApiHealth() {
     const roleLocked = body.auth.mode !== "demo";
     const selectedRole = roleLocked ? body.auth.role : state.drawing.currentRole;
     const drawingChanged = drawingBody.drawing.id !== state.drawing.id;
-    if (drawingChanged) state.layoutDraft = null;
+    if (drawingChanged) {
+      state.layoutDraft = null;
+      // 別の図面へ切り替わるため、前の図面向けに応答待ちの操作結果は適用させない。
+      drawingEpoch += 1;
+    }
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。
     // 同じ図面の再同期で、利用者が今見ている表示を古い記憶位置へ戻さない。

@@ -3,7 +3,7 @@
 ![MVP](https://img.shields.io/badge/Status-MVP-F59E0B?style=for-the-badge)
 ![Cloudflare Access](https://img.shields.io/badge/Cloudflare-Access-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Database-Local_PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white)
-![E2E](https://img.shields.io/badge/E2E-97%2F97_Passed-16A34A?style=for-the-badge&logo=playwright&logoColor=white)
+![E2E](https://img.shields.io/badge/E2E-99%2F99_Passed-16A34A?style=for-the-badge&logo=playwright&logoColor=white)
 
 建設・土木の図面を、Webブラウザで作成・修正・確認するための**試作版2D CAD**です。専用ソフトのインストールは不要です。
 
@@ -127,7 +127,7 @@ npm run verify
 実行内容:
 
 - `npm run lint`: 必須ファイル存在、JS構文、未解決マーカー、`_headers`の書式を検査
-- `npm run lint:static`: ESLintで未定義参照・重複キー・到達不能コード・未使用変数等、実行時バグに直結する規則を検査(整形規則は入れず、`require-atomic-updates`のみ警告)
+- `npm run lint:static`: ESLintで未定義参照・重複キー・到達不能コード・未使用変数等、実行時バグに直結する規則を検査(整形規則は入れず、`require-atomic-updates`は変数の再代入のみ警告。現在の警告0件)
 - `npm run typecheck`: TypeScriptの`checkJs`でブラウザ/Core/API/DB層を型検査
 - `npm run a11y`: lang、viewport、aria、focus-visible、Responsive CSS等を静的検査
 - `npm test`: CAD Core、コマンド解析、JSON/DXF Import、公開境界、API認証/権限、JWT fail-closed、Idempotency、原子更新、AI承認を検査

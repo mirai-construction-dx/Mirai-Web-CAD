@@ -187,6 +187,8 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.
 
 `mainブランチをfast-forward → npm ci → build → db:check → systemctl restart → health確認`を行い、DB検証またはhealth確認に失敗した場合は直前のコミットへ自動ロールバックする。
 
+fast-forwardでこのスクリプト自体が更新された場合は、新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
+
 DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
 
 #### Migrationを含むリリース
