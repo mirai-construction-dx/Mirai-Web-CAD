@@ -31,7 +31,7 @@ npm run verify:fast   # lint / ESLint / typecheck / a11y / 単体テスト / bui
 npm run test:e2e      # Playwright desktop/mobile(ポートが空いている前提)
 ```
 
-- **本番の作業ツリーでbuildしない。** 本番とMVPのサービスはリポジトリ直下の`dist/`をリクエストごとに読むため、`npm run build`/`verify`/`dev`を実行すると未マージのコードが即座に配信される。検証は`git worktree`等の別ディレクトリで行う。
+- **本番の作業ツリーでbuildも依存導入もしない。** 本番とMVPのサービスはリポジトリ直下の`dist/`(`.releases/<sha>/dist`へのsymlink)をリクエストごとに読み、`node_modules/`(同じくsymlink)を実行時に使う。`npm run build`/`verify`/`dev`/`test:e2e`(`E2E_BASE_URL`なしだと`npm run dev`でbuildする)や`npm ci`を実行すると、未マージのコードの配信や依存の消失が起きる。検証は`git worktree`等の別ディレクトリで行う。worktreeの`node_modules`を本番へのsymlinkにした場合、そこで`npm ci`を実行しない。
 - E2Eを別ディレクトリで流すときは、空いているポートで`PORT=<port> HOST=127.0.0.1 node scripts/serve-local.mjs`を起動し、`E2E_BASE_URL=http://127.0.0.1:<port> npx playwright test`とする(使用中ポートに別プロセスがあると誤った結果になる)。
 - 追加したテストは、修正前のコードで失敗することを確かめる。
 

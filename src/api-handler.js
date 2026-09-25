@@ -858,10 +858,13 @@ function sanitizeProbe(db) {
 function deployProvenance(env) {
   const info = env.DEPLOY_INFO;
   if (!info || typeof info !== "object") {
-    return { commit: null, branch: null, dirty: null };
+    return { commit: null, distCommit: null, branch: null, dirty: null };
   }
+  const distCommit = typeof info.distCommit === "function" ? info.distCommit() : info.distCommit;
   return {
     commit: typeof info.commit === "string" ? info.commit : null,
+    // 配信中の画面(dist/)のbuild元commit。commitと異なる場合、サーバーと画面の版がずれている。
+    distCommit: typeof distCommit === "string" ? distCommit : null,
     branch: typeof info.branch === "string" ? info.branch : null,
     dirty: typeof info.dirty === "boolean" ? info.dirty : null
   };
