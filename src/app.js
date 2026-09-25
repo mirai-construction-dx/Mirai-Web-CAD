@@ -2968,7 +2968,10 @@ async function checkApiHealth() {
     const drawingChanged = drawingBody.drawing.id !== state.drawing.id;
     if (drawingChanged) {
       state.layoutDraft = null;
+      // 前の図面の作図途中の点・カーソル位置を、新しい図面の距離入力や@の基準にしない。
       state.lastPoint = null;
+      state.draftPoints = [];
+      state.pointerWorld = null;
     }
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。
