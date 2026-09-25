@@ -52,7 +52,7 @@
 | 3. マージ前の人間レビュー | **決定** | B型を継続(品質ゲート+CodeRabbit+会話解決必須+高リスク変更のオーナーY/N)。**Botは2人目の代わりにしない**(PORT-GOV-001/ADR-0016でBotは承認しない、AIが作成と承認を兼ねると自己承認になる)。2人目(2026-09-28提示予定)参加後の承認方式の見直しは、組織全体としてCore ADR-0016の条件に従う |
 | 4. CODEOWNERSのTeam | **決定** | B型のためCODEOWNERSは置かない(現行の個人指定は既存のまま)。承認型へ変える場合に、Write以上のTeamで整備する |
 | 5. 技術標準の適用範囲 | **決定** | アプリ構成は例外として維持、実行環境はNode 24へ2027-01-31まで、PostgreSQL 18へ2027-11-30までに更新([ADR-0004](adr/ADR-0004-tech-stack-vs-os-selection.md)承認済み) |
-| 6. Core成果物の版 | **決定** | 取り込むのは署名・SHA256付きのGitHub Releaseのみ(タグのvendoringはしない)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で必要な版がReleaseされていなければCoreへRelease作成を依頼する |
+| 6. Core成果物の版 | **決定** | 取り込むのはCoreのGitHub Releaseのみ(タグのvendoringはしない)。`SHA256SUMS`照合と`mhc verify`に加え、署名・来歴証明の検証を必須とする(現在のv0.1.0は署名・attestationなし)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で、必要な版の署名付きReleaseが無ければCoreへ作成を依頼する。手順は[基盤連携の要件と現状](architecture/platform-integration.md)§3 |
 | 7. 案件ID・確定版・MCP | **決定** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続し、MCIPの案件ID API公開時に外部ID列をadditive migrationで追加。確定版: CDEのAPI公開時に承認済み版を登録。MCP: 読み取り系ツールから、Coreで契約化→Allowlist登録の順 |
 | 8. Organization名 | **決定** | `mirai-construction-dx`に統一。原典(全体構成 V3.6)のHTMLは変更せず、Portfolioの未決事項表(PORT-BL-001 BL-06)に決定を記録(Portfolio PR #20) |
 

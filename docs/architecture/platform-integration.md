@@ -46,10 +46,13 @@
 
 現時点でWeb-CADが利用するCore成果物は無いため、lockファイルは置かない(使っていないものを固定すると実態と合わない記録になる)。取り込むときは次による。
 
-1. 取り込む契約(例: `schemas/evidence/*`、`schemas/event/envelope.schema.json`、MCP tool定義)と、利用する版を決める。2026-09-25時点でCoreのGitHub Releaseは`v0.1.0`のみ(SHA256SUMS・aibom付き)、タグは`v0.6.0`まで(`VERSION`=0.6.0)。他のConsumer(CEOS)はタグ`v0.6.0`をvendoringで固定している。どちらに合わせるかは判断事項。
-2. `contracts/harness-core.lock.json`(CEOSと同じ形式: `core_version`、`source.repo/tag/commit`、ファイルごとのSHA256)で固定する。`contracts/`配下は取得物として手編集しない。`latest`・main直参照・submoduleは使わない。
-3. CIでlockのハッシュを照合する検査を追加する。
-4. system_id(Core `registries/systems.yaml`への登録)を先に確定する。
+決定(2026-09-25、台帳§4の6): **CoreのGitHub Releaseからのみ取り込む**。タグの内容をvendoringする方式(他Consumerの暫定方式)は使わない。
+
+1. 取り込む契約(例: `schemas/evidence/*`、`schemas/event/envelope.schema.json`、MCP tool定義)と、それを含むReleaseを選ぶ。必要な版がReleaseされていなければCoreへRelease作成を依頼する(2026-09-25時点でReleaseは`v0.1.0`のみ。タグは`v0.6.0`まであるがReleaseではない)。
+2. Releaseの`SHA256SUMS`で成果物のハッシュを照合し、Coreの利用者ガイド(`docs/consumer-guide.md`)の手順どおり`contracts.lock.json`で版・ダイジェストを固定して`mhc verify`を通す。`contracts/`配下は取得物として手編集しない。`latest`・main直参照・submoduleは使わない。
+3. **署名・来歴証明(attestation)の検証を必須とする**。CoreのRelease手順は`actions/attest-build-provenance`と署名に対応しているが、署名鍵の設定待ちで無効。`v0.1.0`の成果物にはattestationが無い(2026-09-25にGitHub APIで404を確認)。取り込む時点で署名・attestationが無いReleaseしか無い場合は、署名付きReleaseをCoreへ依頼し、それまで取り込まない。
+4. CIで`mhc verify`とlockのダイジェスト照合を実行する。
+5. system_idは`web-cad`(Core PR #27で登録申請中)。
 
 参考(照合用、取込みは未実施): Core Release `v0.1.0` の`contracts.tar.gz`のSHA256は`bbbacae714dcecb3102fbacf0e51e0f538eb04fcc32c0de9bd5ca2ddb0949c26`(同Releaseの`SHA256SUMS`)。
 
@@ -71,5 +74,5 @@ Core `schemas/evidence/ai-run.schema.json`と`schemas/event/envelope.schema.json
 
 ## 5. 本リポジトリ内で実施済み・今後の対応
 
-- 実施済み: `CLAUDE.md`・`AGENTS.md`の新設、本文書、ADR-0003(承認済み)/0004(提案)、判断事項の台帳化と2026-09-25のオーナー決定の反映。
+- 実施済み: `CLAUDE.md`・`AGENTS.md`の新設、本文書、ADR-0003(承認済み)/0004(承認済み)、判断事項の台帳化と2026-09-25のオーナー決定の反映。
 - 他リポジトリ・設計判断が必要(記録のみ。本リポジトリでは実施しない): 台帳§4を参照。

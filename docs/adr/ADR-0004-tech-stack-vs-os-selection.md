@@ -25,9 +25,9 @@ OS・アプリケーション選定 ベストプラクティス V3.5 は、Postg
 
 ## 決定
 
-1. **アプリ構成は例外として維持する**(案A)。vanilla JS(ES modules)+ esbuild + `checkJs`、Node製API。React + TypeScript + Vite / FastAPI への置換は実質的な再実装であり、行わない。
+1. **アプリ構成は例外として維持する**(案A)。vanilla JS(ES modules)+ esbuild + `checkJs`、Node製API。React + TypeScript + Vite / FastAPI への置換は実質的な再実装であり、行わない。標準はNodeを「buildのみ」とするが、Web-CADは**本番でもNodeでAPIサーバーを実行する**。これはアプリ構成の例外に含まれる(標準への準拠ではない)。
 2. **実行環境は標準へ更新する**(案Bのうち実行環境のみ)。
-   - Node: 24 LTSへ更新する(CI → `engines` → 本番の順)。**期限 2027-01-31**(Node 22のサポート終了 2027-04-30 の3か月前)。
+   - Node: 24 LTSへ更新する。本番ランタイム(APIサーバー)を含む版の更新として、CI → `engines` → 本番ホストの順で行う。**期限 2027-01-31**(Node 22のサポート終了 2027-04-30 の3か月前)。
    - PostgreSQL: 18へ更新する(バックアップ・復元ドリルを含む移行手順で実施)。**期限 2027-11-30**(PostgreSQL 16のサポート終了 2028-11 の1年前)。PostGIS/pgvector等が必要になった場合は前倒しする。
 3. 標準との差(アプリ構成)はPortfolioの基礎資料適用マトリクスに例外として記録することを推奨する。
 
