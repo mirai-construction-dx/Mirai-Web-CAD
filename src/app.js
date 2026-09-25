@@ -1527,8 +1527,9 @@ async function executeUiCommand(command) {
     log(`現在レイヤー: ${layerName(command.layerId)}`);
   }
   if (command.action === "fit") {
-    rememberViewForPrevious();
+    const before = { ...state.camera };
     fitCameraToDrawing();
+    recordViewChange(before);
   }
   if (command.action === "zoomWindow") zoomToWindow(command.corners[0], command.corners[1]);
   if (command.action === "zoomPrevious") {
@@ -1536,13 +1537,15 @@ async function executeUiCommand(command) {
     return;
   }
   if (command.action === "zoomFactor") {
-    rememberViewForPrevious();
+    const before = { ...state.camera };
     applyUserCamera(zoomCameraAtCenter(state.camera, command.factor, currentCanvasView()));
+    recordViewChange(before);
   }
   if (command.action === "pan") {
-    rememberViewForPrevious();
+    const before = { ...state.camera };
     state.camera.x += command.offset.x * state.camera.scale;
     state.camera.y += command.offset.y * state.camera.scale;
+    recordViewChange(before);
     state.viewChanged = true;
     state.cameraMode = "user";
     log(`パン: ${command.offset.x},${command.offset.y}`);
@@ -1594,14 +1597,18 @@ function navigateCommandHistory(event) {
 }
 
 function fitToDrawing() {
-  rememberViewForPrevious();
+  const before = { ...state.camera };
   fitCameraToDrawing();
+  recordViewChange(before);
   render();
 }
 
-// 利用者の表示操作の直前に、現在の表示をZOOM P用の履歴へ積む。
-function rememberViewForPrevious() {
-  state.viewHistory = pushViewHistory(state.viewHistory, state.camera);
+// 利用者の表示操作で表示が実際に変わった場合だけ、操作前の表示をZOOM P用の履歴へ積む
+// (変化のない全体表示やZOOM 1Xで履歴を消費させない)。ホイールの連続操作のまとまりもここで区切る。
+function recordViewChange(before) {
+  endWheelGroup();
+  const changed = before.x !== state.camera.x || before.y !== state.camera.y || before.scale !== state.camera.scale;
+  if (changed) state.viewHistory = pushViewHistory(state.viewHistory, before);
 }
 
 function currentCanvasView() {
@@ -1619,8 +1626,9 @@ function applyUserCamera(camera) {
 
 function zoomToWindow(a, b) {
   const camera = cameraForWindow(a, b, currentCanvasView());
-  rememberViewForPrevious();
+  const before = { ...state.camera };
   applyUserCamera(camera);
+  recordViewChange(before);
 }
 
 function zoomPrevious() {
@@ -1631,6 +1639,7 @@ function zoomPrevious() {
     return;
   }
   state.viewHistory = state.viewHistory.slice(0, -1);
+  endWheelGroup();
   applyUserCamera({ ...previous });
   render();
 }
@@ -1963,12 +1972,13 @@ function zoomAtCenter(factor) {
   const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
   const view = canvasViewSize(canvas);
-  rememberViewForPrevious();
+  const previousCamera = { ...state.camera };
   const before = screenToWorld(view.width / 2, view.height / 2);
   state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(view.width / 2, view.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  recordViewChange(previousCamera);
   state.viewChanged = true;
   state.cameraMode = "user";
   log(`ズーム: ${zoomReadoutText()}`);
@@ -2200,7 +2210,8 @@ function onPointerMove(event) {
   const world = snapPoint(rawWorld);
   updateCoordReadout(world);
   if (state.draftPoints.length > 0) {
-    drawCanvas(world);
+    // 窓ズームはスナップしない点で範囲を確定するため、プレビューも同じ点で描く。
+    drawCanvas(state.tool === "zoomwindow" ? rawWorld : world);
   }
 }
 
@@ -2213,7 +2224,7 @@ function onPointerUp() {
   if (state.panStart) {
     const moved = state.camera.x !== state.panStart.camera.x || state.camera.y !== state.panStart.camera.y;
     if (moved) {
-      state.viewHistory = pushViewHistory(state.viewHistory, state.panStart.camera);
+      recordViewChange(state.panStart.camera);
       state.viewChanged = true;
       state.cameraMode = "user";
     }
@@ -2260,12 +2271,20 @@ function cancelDrag() {
 }
 
 // 連続したホイール操作は1回の表示変更として履歴に積む(ZOOM Pで1ノッチずつ戻らない)。
+// まとまりの開始時の表示を控え、実際に表示が変わった時点で1回だけ積む。
 let lastWheelAt = 0;
+/** @type {{ x: number, y: number, scale: number } | null} */
+let wheelGroupStart = null;
+
+function endWheelGroup() {
+  lastWheelAt = 0;
+  wheelGroupStart = null;
+}
 
 function onWheel(event) {
   event.preventDefault();
   const now = Date.now();
-  if (now - lastWheelAt > 800) rememberViewForPrevious();
+  if (now - lastWheelAt > 800) wheelGroupStart = { ...state.camera };
   lastWheelAt = now;
   const factor = event.deltaY < 0 ? 1.12 : 0.9;
   const before = screenToWorld(event.offsetX, event.offsetY);
@@ -2273,6 +2292,10 @@ function onWheel(event) {
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  if (wheelGroupStart && (wheelGroupStart.x !== state.camera.x || wheelGroupStart.y !== state.camera.y || wheelGroupStart.scale !== state.camera.scale)) {
+    state.viewHistory = pushViewHistory(state.viewHistory, wheelGroupStart);
+    wheelGroupStart = null;
+  }
   state.viewChanged = true;
   state.cameraMode = "user";
   drawCanvas();

@@ -239,8 +239,15 @@ export function parseCadCommand(input, context) {
   }
   if (["Z", "ZOOM"].includes(command)) {
     const option = (tokens[0] ?? "EXTENTS").toUpperCase();
-    if (["E", "EXTENTS", "ALL", "A"].includes(option)) return { kind: "ui", action: "fit" };
-    if (["P", "PREVIOUS"].includes(option)) return { kind: "ui", action: "zoomPrevious" };
+    // 誤入力で表示を変えないよう、E/Pに余分な引数があれば拒否する。
+    if (["E", "EXTENTS", "ALL", "A"].includes(option)) {
+      if (tokens.length > 1) throw new Error("形式: ZOOM E");
+      return { kind: "ui", action: "fit" };
+    }
+    if (["P", "PREVIOUS"].includes(option)) {
+      if (tokens.length > 1) throw new Error("形式: ZOOM P");
+      return { kind: "ui", action: "zoomPrevious" };
+    }
     if (["W", "WINDOW"].includes(option)) {
       // 2点を省略した場合はCanvas上の2回クリックで範囲を指定する。
       if (tokens.length === 1) return { kind: "ui", action: "tool", tool: "zoomwindow" };
@@ -254,7 +261,7 @@ export function parseCadCommand(input, context) {
     const factorMatch = /^(\d+(?:\.\d+)?|\.\d+)X$/i.exec(tokens[0] ?? "");
     if (factorMatch && tokens.length === 1) {
       const factor = Number(factorMatch[1]);
-      if (!(factor > 0)) throw new Error("ZOOMの倍率は0より大きい値を 2X のように指定してください。");
+      if (!Number.isFinite(factor) || !(factor > 0)) throw new Error("ZOOMの倍率は0より大きい有限の値を 2X のように指定してください。");
       return { kind: "ui", action: "zoomFactor", factor };
     }
     throw new Error("ZOOMは E(全体) / W(窓) / P(前画面) / 倍率(例: 2X, 0.5X) に対応しています。");

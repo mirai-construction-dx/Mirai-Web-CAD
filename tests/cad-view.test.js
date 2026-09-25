@@ -157,6 +157,7 @@ test("ZOOM Window fits the picked rectangle to the canvas around its center", ()
   assert.equal(cameraForWindow({ x: 0, y: 0 }, { x: 800, y: 0 }, viewport).scale, 1);
   assert.equal(cameraForWindow({ x: 0, y: 0 }, { x: 1, y: 1 }, viewport).scale, CAMERA_MAX_SCALE);
   assert.throws(() => cameraForWindow({ x: 5, y: 5 }, { x: 5, y: 5 }, viewport), /同じ/);
+  assert.throws(() => cameraForWindow({ x: -1e308, y: 0 }, { x: 1e308, y: 10 }, viewport), /大きすぎ/);
 });
 
 test("ZOOM nX scales around the view center", () => {

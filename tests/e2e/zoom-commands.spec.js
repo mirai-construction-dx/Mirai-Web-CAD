@@ -64,3 +64,29 @@ test("ZOOM W without points picks the window with two canvas clicks", async ({ p
   expect(Number.parseFloat(await readout(page))).toBe(before);
   await expect(page.getByText(/^SELECT/)).toBeVisible();
 });
+
+test("ZOOM P ignores view actions that did not change the view and ends wheel groups", async ({ page }) => {
+  await command(page, "ZOOM E");
+  await command(page, "ZOOM W 9000,5000 11000,7000");
+  const windowView = await readout(page);
+  // 変化のない全体表示の繰り返し・ZOOM 1Xは履歴を消費しない。
+  await command(page, "ZOOM E");
+  const extents = await readout(page);
+  await command(page, "ZOOM E");
+  await command(page, "ZOOM 1X");
+  await command(page, "ZOOM P");
+  expect(await readout(page)).toBe(windowView);
+  // ホイール→ZOOM P→(800ms以内に)再びホイールしても、ZOOM Pで直前の表示へ戻れる。
+  await command(page, "ZOOM E");
+  const canvas = page.locator("#cadCanvas");
+  const box = await canvas.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -100);
+  await command(page, "ZOOM P");
+  expect(await readout(page)).toBe(extents);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -100);
+  await expect.poll(() => readout(page)).not.toBe(extents);
+  await command(page, "ZOOM P");
+  expect(await readout(page)).toBe(extents);
+});

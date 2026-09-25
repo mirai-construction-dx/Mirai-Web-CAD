@@ -201,14 +201,18 @@ export const VIEW_HISTORY_LIMIT = 20;
 export function cameraForWindow(a, b, viewport) {
   const width = Math.abs(b.x - a.x);
   const height = Math.abs(b.y - a.y);
+  // 極端な座標では差が無限大に溢れ、縮尺0・座標NaNのカメラになるため適用前に拒否する。
+  if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error("窓ズームの範囲が大きすぎます。");
   if (!(width > 0) && !(height > 0)) throw new Error("窓ズームの2点が同じです。範囲を指定してください。");
   const fit = Math.min(width > 0 ? viewport.width / width : Infinity, height > 0 ? viewport.height / height : Infinity);
   const scale = Math.min(CAMERA_MAX_SCALE, fit);
-  return {
+  const camera = {
     x: viewport.width / 2 - ((a.x + b.x) / 2) * scale,
     y: viewport.height / 2 - ((a.y + b.y) / 2) * scale,
     scale
   };
+  if (!(scale > 0) || !Number.isFinite(camera.x) || !Number.isFinite(camera.y)) throw new Error("窓ズームの範囲を表示できません。");
+  return camera;
 }
 
 /** 画面中心を保って縮尺をfactor倍にしたカメラ(ZOOM nX)。操作用の縮尺範囲へ丸める。 */

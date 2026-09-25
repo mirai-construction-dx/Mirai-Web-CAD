@@ -228,4 +228,8 @@ test("ZOOM supports extents, window, previous and scale factor", () => {
   assert.throws(() => ui("ZOOM 2"), /E\(全体\) \/ W\(窓\) \/ P\(前画面\)/);
   assert.throws(() => ui("ZOOM W 0,0"), /形式: ZOOM W/);
   assert.throws(() => ui("ZOOM Q"), /E\(全体\)/);
+  // 余分な引数・無限大の倍率は表示を変えずに拒否する。
+  assert.throws(() => ui("ZOOM P 2X"), /形式: ZOOM P/);
+  assert.throws(() => ui("ZOOM E unexpected"), /形式: ZOOM E/);
+  assert.throws(() => ui(`ZOOM ${"9".repeat(400)}X`), /有限/);
 });
