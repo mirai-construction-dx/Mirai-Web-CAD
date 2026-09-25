@@ -1550,6 +1550,8 @@ function tryDirectDistanceEntry(raw) {
   if (!/^(\d+(?:\.\d+)?|\.\d+)$/.test(raw)) return false;
   const last = state.draftPoints.at(-1);
   if (!last || !DIRECT_DISTANCE_TOOLS.has(state.tool)) return false;
+  // レイアウト空間では作図結果が見えないため、モデル空間に戻るまで受け付けない。
+  if (state.space !== "model") throw new Error("距離の直接入力はモデル空間でのみ使用できます。モデルタブへ切り替えてください。");
   const distance = Number(raw);
   if (!(distance > 0)) throw new Error("距離は0より大きい値を入力してください。");
   const cursor = state.pointerWorld;

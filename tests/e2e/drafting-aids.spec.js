@@ -76,6 +76,14 @@ test("typing a distance while drawing places the point toward the cursor", async
   expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeCloseTo(750, 6);
   expect(b.x - a.x).toBeCloseTo(750, 6);
   await expect(page.getByLabel("コマンドログ")).toContainText("距離の直接入力: 750");
+  // レイアウト空間では受け付けず、図形を追加しない。
+  const count = (await page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-mvp")).entities.length));
+  await command(page, "LINE");
+  await canvas.click({ position: start });
+  await page.getByRole("button", { name: "レイアウト1", exact: true }).click();
+  await command(page, "300");
+  await expect(page.getByLabel("コマンドログ")).toContainText("モデル空間でのみ使用できます");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-mvp")).entities.length)).toBe(count);
 });
 
 test("tangent OSnap snaps the second point to the tangent point on a circle", async ({ page }) => {
