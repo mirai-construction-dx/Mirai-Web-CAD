@@ -89,6 +89,29 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: npm run db:verify
+      # デプロイ経路が使う読み取り専用検査が、migration適用直後のDBで成立することを確認する。
+      - run: npm run db:check
+      # 一時DBを意図的に壊し、db:checkが未検証(NOT VALID)の制約と欠落した索引を検出して失敗することを確認する。
+      - name: db:check rejects unvalidated constraints and missing indexes
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "alter table projects drop constraint projects_access_scope_check" \
+            -c "alter table projects add constraint projects_access_scope_check check (access_scope in ('open', 'restricted')) not valid"
+          if npm run -s db:check; then echo "db:check must fail for a NOT VALID constraint" >&2; exit 1; fi
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "alter table projects validate constraint projects_access_scope_check"
+          npm run -s db:check
+          # 同名の索引が存在するが無効(indisvalid=false)な状態を、失敗したCREATE UNIQUE INDEX CONCURRENTLYで作る。
+          # 名前は解決できるため、存在確認だけの検査では検出できないケース。
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "insert into projects (id, name, owner, status) values ('prj_ci_invalid_index', 'CI probe', 'ci', 'active')" \
+            -c "insert into project_members (project_id, member, added_by) select id, 'ci-duplicate@example.invalid', 'ci' from projects where id in ('prj_ci_invalid_index', (select id from projects where id <> 'prj_ci_invalid_index' limit 1))" \
+            -c "drop index idx_project_members_member"
+          if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "create unique index concurrently idx_project_members_member on project_members(member)"; then
+            echo "the unique index build was expected to fail on duplicate members" >&2; exit 1
+          fi
+          test "$(psql "$DATABASE_URL" -Atc "select i.indisvalid from pg_index i where i.indexrelid = to_regclass('public.idx_project_members_member')")" = "f"
+          if npm run -s db:check; then echo "db:check must fail for an invalid index" >&2; exit 1; fi
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "drop index idx_project_members_member"
+          if npm run -s db:check; then echo "db:check must fail for a missing index" >&2; exit 1; fi
 
   postgres-integration:
     name: PostgreSQL Data Store Integration

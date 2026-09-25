@@ -111,7 +111,7 @@ ENTRA_GROUP_CACHE_TTL_MINUTES=15   # 任意、既定15分。グループ変更�
 - グループ所属変更の反映には最大`ENTRA_GROUP_CACHE_TTL_MINUTES`分の遅延がある(インメモリキャッシュ、プロセス再起動で即時クリアされる)
 - キャッシュが空(プロセス起動直後・TTL切れ直後)の状態で複数利用者が同時にアクセスすると、各リクエストが独立してMicrosoft Graphへ問い合わせるため(リクエスト合流は未実装)、Entra ID側が輻輳中の場合に一時的な負荷集中が起き得る。7名規模のIT/DX部門での利用スケールでは実害は小さいと判断し、本実装では対応していない。将来の利用者数拡大時は再検討する
 
-### 3. Migration適用
+### 3. Migration適用(初回セットアップ)
 
 ```bash
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:verify
@@ -185,7 +185,28 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`mainブランチをfast-forward → npm ci → build → db:verify → systemctl restart → health確認`を行い、health確認に失敗した場合は直前のコミットへ自動ロールバックする。
+`mainブランチをfast-forward → npm ci → build → db:check → systemctl restart → health確認`を行い、DB検証またはhealth確認に失敗した場合は直前のコミットへ自動ロールバックする。
+
+DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
+
+#### Migrationを含むリリース
+
+`db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、検証済み(`convalidated`)のCHECK制約7、有効(`indisvalid`)な索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
+
+新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、直前のコミットへ自動ロールバックされる。
+
+**本番DBへ`db:verify`を実行してはならない**(全migrationに加えて`seeds/demo.sql`を適用し、デモ行の投入・`dwg_demo_001`の上書き・監査トリガの再作成が起きる)。次の順で、対象migrationだけを適用してからデプロイする。
+
+1. 事前バックアップを取得する(「バックアップ」節)
+2. 検証用DB(本番の復元コピー等)で対象migrationを適用し、続けて`db:check`が成功することを確認する
+3. 本番DBへ**対象migrationファイルだけ**を単一トランザクションで適用する。監査ログの所有権分離後は所有者ロールまたは管理者の接続文字列で実行する([運用・復旧メモ](operations.md)参照)
+
+   ```bash
+   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f migrations/0009_example.sql
+   ```
+
+   `MIGRATION_DATABASE_URL`は所有者ロール等の接続文字列(`production.env`とは別に安全に管理し、リポジトリへ置かない)。
+4. `DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 

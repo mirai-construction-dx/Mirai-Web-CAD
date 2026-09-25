@@ -41,7 +41,12 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "DATABASE_URLが設定されていません。~/.config/mirai-web-cad/production.envをsourceしてください。" >&2
   exit 1
 fi
-npm run db:verify
+# 本番DBへは書き込まず、migration適用済みであることだけを検証する(改善台帳P0-74)。
+# db:verifyはmigration+seeds/demo.sqlを毎回適用し、デモ行投入・dwg_demo_001の上書き・
+# 監査トリガの再作成を本番DBへ起こすため、デプロイでは実行しない。migrationを含む
+# リリースは、デプロイ前に手順書「Migrationを含むリリース」に従って適用しておくこと。
+# 未適用ならdb:checkがexit 1で失敗し、ERR trapで直前のcommitへロールバックする。
+npm run db:check
 
 sudo systemctl restart mirai-web-cad.service
 

@@ -76,7 +76,7 @@ DATABASE_URL="postgresql://mirai_web_cad_app:...@127.0.0.1:5432/mirai_web_cad" n
 DATABASE_URL="postgresql://mirai_web_cad_app:...@127.0.0.1:5432/mirai_web_cad" npm run db:check
 ```
 
-`db:check`は**書き込みを一切行わず**、migration 0001〜0008が作る9テーブル、`drawings.revision`/`drawings.visibility`/`projects.access_scope`列、監査の追記専用トリガ**3件**(UPDATE/DELETE/TRUNCATE)と各操作の拒否(検査はROLLBACK)、JSONB string scalarが0件であることを確認します。未適用があれば欠落を列挙して**終了コード1**で失敗します。
+`db:check`は**書き込みを一切行わず**、`covered_migrations`に登録したmigration(0001〜0008)の適用後状態として列挙した9テーブル、`drawings.revision`/`drawings.visibility`/`projects.access_scope`列、CHECK制約7件、索引7件、監査の追記専用トリガ**3件**(UPDATE/DELETE/TRUNCATE)と各操作の拒否(検査はROLLBACK)、JSONB string scalarが0件であることを確認します。未適用があれば欠落を列挙して**終了コード1**で失敗します。
 
 実測(2026-09-18): migration適用済DBで`db:check`実行前後の行数と`content_hash`のmd5が完全一致(書き込みゼロ)。空DBでは欠落テーブル・列を列挙してexit 1。
 
@@ -106,7 +106,7 @@ sudo -u postgres psql -d mirai_web_cad \
 > 所有権を分離した後は、`db:verify`(migration適用)を**アプリ用ロールで実行できません**(`must be owner of table audit_logs`で失敗します。実測確認済み)。migration適用は所有者ロールまたは管理者で実行してください。`db:check`はどちらの構成でも正常に動作します。
 
 > [!NOTE]
-> `db:verify`(migration+`seeds/demo.sql`適用)をデプロイのたびに本番DBへ実行すると、デモ行の投入、`0004`による`dwg_demo_001`の`name`上書きと`visibility='public'`強制、`0006`による監査トリガのdrop→UPDATE→再作成が毎回発生します(2026-09-18の独立監査で指摘、改善台帳P0-74)。`db:check`はこの問題に対する**読み取り専用の代替**として追加しました。デプロイ手順(`scripts/deploy-local.sh`)自体の切替は、手順書(`docs/deployment-local.md`)の同時更新が必要なため**未実施**です(セッションのポリシーゲートにより当該ファイルを編集できませんでした。人間側での手順書更新と併せて切替えてください)。
+> `db:verify`(migration+`seeds/demo.sql`適用)をデプロイのたびに本番DBへ実行すると、デモ行の投入、`0004`による`dwg_demo_001`の`name`上書きと`visibility='public'`強制、`0006`による監査トリガのdrop→UPDATE→再作成が毎回発生します(2026-09-18の独立監査で指摘、改善台帳P0-74)。`db:check`はこの問題に対する**読み取り専用の代替**として追加し、2026-09-25にデプロイ手順(`scripts/deploy-local.sh`)を`db:check`へ切り替えました。migrationを含むリリースの適用手順は[ローカルデプロイ運用メモ](deployment-local.md)の「Migrationを含むリリース」を参照してください。
 
 ## リリース判定基準
 
