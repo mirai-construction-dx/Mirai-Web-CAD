@@ -333,6 +333,8 @@ const state = {
   cameraMode: "default",
   /** @type {{ minX: number, minY: number, maxX: number, maxY: number }[]} */
   fitBounds: [],
+  // 直近のfitが利用者の明示操作(全体表示・ZOOM E・Import等)か、起動時の自動fitか。
+  fitExplicit: false,
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1608,8 +1610,9 @@ function observeCanvasResize() {
   if (canvas) canvasResizeObserver.observe(canvas);
 }
 
-/** @type {{ drawingId: string, view: { cx: number, cy: number, scale: number } } | null} */
-let pendingViewSave = null;
+/** 保存待ちの表示位置(図面IDごと)。300ms以内に図面を切り替えても前の図面の保存を失わない。 */
+/** @type {Map<string, { cx: number, cy: number, scale: number }>} */
+const pendingViewSaves = new Map();
 let viewSaveTimer = 0;
 
 function loadSavedViews() {
@@ -1621,20 +1624,22 @@ function loadSavedViews() {
 }
 
 // ズーム・パンの連続操作で書き込みが集中しないよう、最後の表示だけを少し遅らせて保存する。
-// 図面IDと表示位置は操作時点で確定させ、直後に図面が切り替わっても取り違えない。
+// 図面IDと表示位置は操作時点で確定させ、直後に図面が切り替わっても取り違えない・失わない。
 function scheduleViewSave(view) {
-  pendingViewSave = { drawingId: state.drawing.id, view: cameraToSavedView(state.camera, view) };
+  pendingViewSaves.set(state.drawing.id, cameraToSavedView(state.camera, view));
   clearTimeout(viewSaveTimer);
   viewSaveTimer = window.setTimeout(flushViewSave, 300);
 }
 
 function flushViewSave() {
   clearTimeout(viewSaveTimer);
-  if (!pendingViewSave) return;
-  const { drawingId, view } = pendingViewSave;
-  pendingViewSave = null;
+  if (pendingViewSaves.size === 0) return;
+  let views = loadSavedViews();
+  const savedAt = Date.now();
+  for (const [drawingId, view] of pendingViewSaves) views = rememberSavedView(views, drawingId, view, savedAt);
+  pendingViewSaves.clear();
   try {
-    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(rememberSavedView(loadSavedViews(), drawingId, view, Date.now())));
+    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views));
   } catch {
     // 保存できない環境(プライベートモード等)では表示位置を記憶しないだけにする。
   }
@@ -1960,7 +1965,6 @@ function onPointerDown(event) {
 
   if (state.tool === "pan" || event.button === 1) {
     state.panStart = { x: event.clientX, y: event.clientY, camera: { ...state.camera } };
-    state.cameraMode = "user";
     event.currentTarget.setPointerCapture(event.pointerId);
     return;
   }
@@ -2128,9 +2132,12 @@ function onPointerUp() {
     return;
   }
   if (state.panStart) {
+    const moved = state.camera.x !== state.panStart.camera.x || state.camera.y !== state.panStart.camera.y;
     state.panStart = null;
-    state.viewChanged = true;
-    state.cameraMode = "user";
+    if (moved) {
+      state.viewChanged = true;
+      state.cameraMode = "user";
+    }
     log("パン表示を更新");
     render();
     return;
@@ -2507,10 +2514,16 @@ function drawCanvas(pointerWorld = null) {
   const drawing = activeDrawing();
   syncCanvasBackingSize(canvas, window.devicePixelRatio);
   const view = canvasViewSize(canvas);
-  if (lastCanvasView && (lastCanvasView.width !== view.width || lastCanvasView.height !== view.height)) {
-    // フォント読込やドック幅でCanvas寸法が描画後に変わった場合、全体表示・復元の意図を保つ。
-    if (state.cameraMode === "fit") state.camera = fitCameraToBounds(state.fitBounds, view);
-    else if (state.cameraMode === "restored") state.camera = keepCenterOnResize(state.camera, lastCanvasView, view);
+  // フォント読込やドック幅でCanvas寸法が描画後に変わった場合、全体表示・復元の意図を保つ。
+  // パンのドラッグ中は利用者の操作を優先して追従しない。
+  if (lastCanvasView && !state.panStart && (lastCanvasView.width !== view.width || lastCanvasView.height !== view.height)) {
+    if (state.cameraMode === "fit") {
+      state.camera = fitCameraToBounds(state.fitBounds, view);
+      // 利用者が明示した全体表示は、再fit後の表示を記憶位置へ反映する。
+      if (state.fitExplicit) state.viewChanged = true;
+    } else if (state.cameraMode === "restored") {
+      state.camera = keepCenterOnResize(state.camera, lastCanvasView, view);
+    }
   }
   lastCanvasView = view;
   if (state.fitPending || state.outOfViewFitPending) {
@@ -2521,6 +2534,7 @@ function drawCanvas(pointerWorld = null) {
       state.camera = fitCameraToBounds(bounds, view);
       state.cameraMode = "fit";
       state.fitBounds = bounds;
+      state.fitExplicit = true;
       state.viewChanged = true;
     } else if (restored && (bounds.length === 0 || boundsIntersectView(bounds, restored, view))) {
       // 前回この図面を見ていた位置へ戻す。保存位置が図面から外れている(内容が変わった)場合は使わない。
@@ -2530,6 +2544,7 @@ function drawCanvas(pointerWorld = null) {
       state.camera = fitCameraToBounds(bounds, view);
       state.cameraMode = "fit";
       state.fitBounds = bounds;
+      state.fitExplicit = false;
     }
     state.fitPending = false;
     state.outOfViewFitPending = false;
@@ -2886,9 +2901,12 @@ async function checkApiHealth() {
     const drawingBody = await apiRequest("/api/drawings/demo");
     const roleLocked = body.auth.mode !== "demo";
     const selectedRole = roleLocked ? body.auth.role : state.drawing.currentRole;
-    if (drawingBody.drawing.id !== state.drawing.id) state.layoutDraft = null;
+    const drawingChanged = drawingBody.drawing.id !== state.drawing.id;
+    if (drawingChanged) state.layoutDraft = null;
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
-    state.outOfViewFitPending = true;
+    // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。
+    // 同じ図面の再同期で、利用者が今見ている表示を古い記憶位置へ戻さない。
+    if (drawingChanged || state.cameraMode === "default") state.outOfViewFitPending = true;
     state.saveStatus = saveDrawing(state.drawing).ok ? "synced" : "failed";
     state.apiStatus = {
       state: "ok",

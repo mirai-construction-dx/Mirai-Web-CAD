@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { circle, createDrawing, line } from "../../src/cad-core.js";
+import { formatZoomPercent } from "../../src/cad-view.js";
 
 const drawing = createDrawing({ currentRole: "drafter", entities: [
   line("layer-structure", [0, 0], [20000, 0], { id: "base" }),
@@ -60,12 +61,19 @@ test("resizing the canvas after ZOOM EXTENTS keeps the drawing fitted around the
     return (await cursorWorld(page, box.width / 2, box.height / 2)).split(",").map((value) => Number(value.trim()));
   };
   const before = await centerOf();
+  const savedView = () => page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-views") ?? "{}").dwg_demo_001 ?? null);
+  await expect.poll(savedView).not.toBeNull();
+  const savedBefore = await savedView();
   // window resizeを伴わないレイアウト変化(ドック幅)でも中心を保つ。
   await page.evaluate(() => document.querySelector(".workspace").style.setProperty("--dock-width", "480px"));
-  await expect.poll(async () => (await page.locator("#cadCanvas").evaluate((element) => element.clientWidth))).toBeLessThan(900);
-  const after = await centerOf();
-  const scale = await page.locator(".zoom-readout").textContent();
-  const tolerance = 2 / (Number.parseFloat(scale) / 1000);
-  expect(Math.abs(after[0] - before[0])).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(after[1] - before[1])).toBeLessThanOrEqual(tolerance);
+  // 幅の縮小(ドック幅の反映)と、再描画後の中心維持を同じポーリングで確かめる。
+  await expect.poll(async () => {
+    const width = await page.locator("#cadCanvas").evaluate((element) => element.clientWidth);
+    const after = await centerOf();
+    const tolerance = 2 / (Number.parseFloat(await page.locator(".zoom-readout").textContent()) / 1000);
+    return width < 900 && Math.abs(after[0] - before[0]) <= tolerance && Math.abs(after[1] - before[1]) <= tolerance;
+  }).toBe(true);
+  // 明示した全体表示は、寸法変化後の再fit結果が記憶位置へ反映される(保存し直され、縮尺も表示と一致)。
+  await expect.poll(async () => (await savedView()).savedAt).toBeGreaterThan(savedBefore.savedAt);
+  expect(formatZoomPercent((await savedView()).scale)).toBe(await page.locator(".zoom-readout").textContent());
 });
