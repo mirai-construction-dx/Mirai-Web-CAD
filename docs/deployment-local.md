@@ -262,6 +262,8 @@ journalctl -u mirai-web-cad-cloudflared.service -f
 
 ### ロールバック
 
+オーナー不在時(承認必須のためmainを戻せない場合)は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md)に従う。
+
 ```bash
 git checkout <直前の正常コミットSHA>
 npm ci && npm run build
