@@ -1723,6 +1723,7 @@ function fitCameraToDrawing() {
 
 function resetAuthoringState() {
   state.viewHistory = [];
+  endWheelGroup();
   state.currentLayerId = state.drawing.layers.some((layer) => layer.id === "layer-structure")
     ? "layer-structure"
     : state.drawing.layers[0]?.id;
@@ -3034,6 +3035,7 @@ async function checkApiHealth() {
     if (drawingChanged) {
       state.layoutDraft = null;
       state.viewHistory = [];
+      endWheelGroup();
     }
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。

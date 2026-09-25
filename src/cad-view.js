@@ -217,7 +217,9 @@ export function cameraForWindow(a, b, viewport) {
 
 /** 画面中心を保って縮尺をfactor倍にしたカメラ(ZOOM nX)。操作用の縮尺範囲へ丸める。 */
 export function zoomCameraAtCenter(camera, factor, viewport) {
-  const scale = clampCameraScale(camera.scale * factor, camera.scale);
+  // 巨大な倍率で積が無限大へ溢れると、clampが最小縮尺を選び拡大が縮小になるため上限で飽和させる。
+  const product = camera.scale * factor;
+  const scale = clampCameraScale(Number.isFinite(product) ? product : CAMERA_MAX_SCALE, camera.scale);
   const centerX = (viewport.width / 2 - camera.x) / camera.scale;
   const centerY = (viewport.height / 2 - camera.y) / camera.scale;
   return { x: viewport.width / 2 - centerX * scale, y: viewport.height / 2 - centerY * scale, scale };

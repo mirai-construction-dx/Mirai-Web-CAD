@@ -169,6 +169,7 @@ test("ZOOM nX scales around the view center", () => {
   assert.ok(Math.abs((400 - zoomed.x) / zoomed.scale - centerBefore.x) < 1e-9);
   assert.ok(Math.abs((200 - zoomed.y) / zoomed.scale - centerBefore.y) < 1e-9);
   assert.equal(zoomCameraAtCenter({ x: 0, y: 0, scale: 1.5 }, 4, viewport).scale, CAMERA_MAX_SCALE);
+  assert.equal(zoomCameraAtCenter({ x: 0, y: 0, scale: 2 }, 1e308, viewport).scale, CAMERA_MAX_SCALE, "overflowing zoom-in saturates at the maximum");
 });
 
 test("view history skips duplicates and keeps only the most recent entries", () => {
