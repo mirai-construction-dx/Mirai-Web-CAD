@@ -91,6 +91,16 @@ jobs:
       - run: npm run db:verify
       # デプロイ経路が使う読み取り専用検査が、migration適用直後のDBで成立することを確認する。
       - run: npm run db:check
+      # 一時DBを意図的に壊し、db:checkが未検証(NOT VALID)の制約と欠落した索引を検出して失敗することを確認する。
+      - name: db:check rejects unvalidated constraints and missing indexes
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "alter table projects drop constraint projects_access_scope_check" \
+            -c "alter table projects add constraint projects_access_scope_check check (access_scope in ('open', 'restricted')) not valid"
+          if npm run -s db:check; then echo "db:check must fail for a NOT VALID constraint" >&2; exit 1; fi
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "alter table projects validate constraint projects_access_scope_check"
+          npm run -s db:check
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "drop index idx_project_members_member"
+          if npm run -s db:check; then echo "db:check must fail for a missing index" >&2; exit 1; fi
 
   postgres-integration:
     name: PostgreSQL Data Store Integration

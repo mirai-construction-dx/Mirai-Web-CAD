@@ -191,7 +191,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
 
 #### Migrationを含むリリース
 
-`db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、CHECK制約7、索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
+`db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、検証済み(`convalidated`)のCHECK制約7、有効(`indisvalid`)な索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
 
 新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、直前のコミットへ自動ロールバックされる。
 

@@ -48,7 +48,7 @@ fi
 expected_tables=(agent_runs audit_logs command_events drawing_versions drawings idempotency_keys project_members projects reviews)
 # migration 0003/0004/0007 が追加する列。
 expected_columns=("drawings:revision" "drawings:visibility" "projects:access_scope")
-# migration 0001/0004/0007 のCHECK制約と、0001/0002/0007 の索引。
+# migration 0001/0004/0007 のCHECK制約(NOT VALIDのままのものは欠落扱い)と、0001/0002/0007 の索引(無効な索引は欠落扱い)。
 expected_constraints=(drawings_state_check drawing_versions_state_check command_events_source_check agent_runs_status_check reviews_status_check drawings_visibility_check projects_access_scope_check)
 expected_indexes=(idx_drawings_project_id idx_versions_drawing_id idx_command_events_version_id idx_agent_runs_version_id idx_audit_logs_target idx_idempotency_keys_created_at idx_project_members_member)
 
@@ -73,23 +73,27 @@ missing_constraints=""
 for constraint in "${expected_constraints[@]}"; do
   present="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
     select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace
-    where n.nspname = 'public' and c.conname = '${constraint}'
+    where n.nspname = 'public' and c.conname = '${constraint}' and c.contype = 'c' and c.convalidated
   ")"
   [[ "$present" == "1" ]] || missing_constraints="${missing_constraints} ${constraint}"
 done
 
 missing_indexes=""
 for index in "${expected_indexes[@]}"; do
-  present="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.${index}') is not null")"
-  [[ "$present" == "t" ]] || missing_indexes="${missing_indexes} ${index}"
+  # 失敗したCREATE INDEX CONCURRENTLYの残骸(indisvalid=false)は、存在しても問い合わせに使われない。
+  present="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
+    select count(*) from pg_index i
+    where i.indexrelid = to_regclass('public.${index}') and i.indisvalid and i.indisready
+  ")"
+  [[ "$present" == "1" ]] || missing_indexes="${missing_indexes} ${index}"
 done
 
 if [[ -n "$missing_tables" || -n "$missing_columns" || -n "$missing_constraints" || -n "$missing_indexes" ]]; then
   echo "database state check failed: migrationが未適用です。" >&2
   [[ -n "$missing_tables" ]] && echo "  欠落テーブル:${missing_tables}" >&2
   [[ -n "$missing_columns" ]] && echo "  欠落列:${missing_columns}" >&2
-  [[ -n "$missing_constraints" ]] && echo "  欠落制約:${missing_constraints}" >&2
-  [[ -n "$missing_indexes" ]] && echo "  欠落索引:${missing_indexes}" >&2
+  [[ -n "$missing_constraints" ]] && echo "  欠落または未検証(NOT VALID)の制約:${missing_constraints}" >&2
+  [[ -n "$missing_indexes" ]] && echo "  欠落または無効な索引:${missing_indexes}" >&2
   echo "  → docs/deployment-local.md「Migrationを含むリリース」に従い、該当migrationを適用してください。" >&2
   echo "     (本番DBへdb:verifyを実行しないこと。seeds/demo.sqlも適用され、デモ行の投入や既存行の上書きが起きます)" >&2
   exit 1
