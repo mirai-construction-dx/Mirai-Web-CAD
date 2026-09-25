@@ -251,16 +251,25 @@ journalctl -u mirai-web-cad-backup.service -n 20
 
 同じホストのディスクだけでは、ホストの故障・盗難・誤削除で本番DBとバックアップを同時に失う。`mirai-web-cad-offsite-backup.timer`が毎日05:00(JST、最大10分のランダム遅延)に`scripts/offsite-backup.sh`を実行し、本番とMVPの最新dump(manifestを含む)を**ageで暗号化してから**Cloudflare R2の`mirai-web-cad-backups`へ転送する(`production/`・`mvp/`)。転送後はリモートのサイズを照合し、最新dumpが36時間より古い場合は転送せずに失敗する。決定事項と初期値は[外部入力・確定待ち台帳](external-input-status.md)§5。
 
-バックアップ・鮮度検査・復元ドリル・オフサイト転送の各ユニットは、失敗すると`OnFailure=`で`mirai-web-cad-notify-failure@<ユニット名>.service`を起動する。これはBot名義で「[運用通知] <ユニット名> が失敗しました」のIssueを作り、未解決の同じIssueがあればコメントを追記する(本文はユニット名・時刻・systemdの結果だけで、ログは載せない)。Issueは自動では閉じないため、原因を解消して再実行が成功したら**手動で**閉じる(閉じた後に再び失敗すると、新しいIssueが作られる)。
+バックアップ・鮮度検査・復元ドリル・オフサイト転送の各ユニットは、失敗すると`OnFailure=`で`mirai-web-cad-notify-failure@<ユニット名>.service`を起動する。これはBot名義で「[運用通知] <ユニット名> が失敗しました」のIssueを作り、未解決の同じIssueがあればコメントを追記する(本文はユニット名・時刻・systemdの結果だけで、ログは載せない)。作成直後のIssueはGitHubの一覧へ数秒遅れて反映されるため、同じユニットが数秒以内に続けて失敗した場合は重複したIssueが作られることがある(2026-09-25の試験で確認。通常のタイマー間隔では起きない)。Issueは自動では閉じないため、原因を解消して再実行が成功したら**手動で**閉じる(閉じた後に再び失敗すると、新しいIssueが作られる)。
 
 初回セットアップ(本番のsecret追加とsystemd設定の変更を含むため、オーナーのY/N後に行う):
 
 0. 転送処理は `age`・`jq` と、公式版の `rclone` を使う。Ubuntu配布の`rclone` v1.60はR2が未対応のチェックサムヘッダー(`X-Amz-Checksum-Crc64nvme`)を送り、アップロードごとに`501 Not Implemented`を受ける(2026-09-25実測)。同じホストの他システムが`/usr/bin/rclone`を使っているため置き換えず、公式版を`/opt/mirai-web-cad/bin/rclone`に置く(ユニットは`RCLONE_BIN`でこれを使う)。
    ```bash
    V=v1.75.1   # 更新時は https://downloads.rclone.org/version.txt を確認
+   FP=FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA   # rclone公式の署名鍵(https://rclone.org/release_signing/)
    curl -fsSO https://downloads.rclone.org/$V/rclone-$V-linux-amd64.zip
    curl -fsSO https://downloads.rclone.org/$V/SHA256SUMS
-   grep " rclone-$V-linux-amd64.zip$" SHA256SUMS | sha256sum -c -     # OK であること
+   # 署名鍵を別経路の2か所から取得し、どちらも上のフィンガープリントと一致することを確かめる
+   # (同じサイトのハッシュだけでは、配布元が改ざんされた場合に検出できないため)。
+   export GNUPGHOME="$(mktemp -d)"
+   curl -fsS "https://keys.openpgp.org/vks/v1/by-fingerprint/$FP" -o k1.asc
+   curl -fsS https://github.com/ncw.gpg -o k2.asc
+   for k in k1.asc k2.asc; do gpg --with-colons --import-options show-only --import "$k" | grep -q "^fpr:::::::::$FP:" || echo "不一致: $k"; done
+   gpg -q --import k1.asc
+   gpg --status-fd 1 --verify SHA256SUMS 2>/dev/null | grep -q "VALIDSIG $FP" && echo "署名OK"   # 署名OK であること
+   gpg --decrypt SHA256SUMS 2>/dev/null | grep " rclone-$V-linux-amd64.zip$" | sha256sum -c -   # OK であること
    unzip -q rclone-$V-linux-amd64.zip
    sudo install -d -m 755 /opt/mirai-web-cad/bin
    sudo install -m 755 rclone-$V-linux-amd64/rclone /opt/mirai-web-cad/bin/rclone
