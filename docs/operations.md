@@ -245,7 +245,7 @@ RESTORE_DATABASE_URL="postgresql://empty-recovery-db" \
 - archiveは`umask 077`で作成し、Gitへ追加しない
 - 復元後に件数だけでなく、実ブラウザでデモ取得、作図、再読込を確認する
 
-本番の日次バックアップは`mirai-web-cad-backup.timer`(systemd、毎日03:10 JST)が担い、`/var/backups/mirai-web-cad/postgres/`へ保存します(保持14日)。詳細は[ローカルデプロイ運用メモ](deployment-local.md)を参照。暫定目標はRPO 24時間、RTO 4時間。オフサイト転送は、ageで暗号化してCloudflare R2へ毎日転送し(保持90日)、バックアップ関連のユニットが失敗するとGitHub Issueで通知します(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「オフサイト転送と失敗通知」、決定事項は[外部入力・確定待ち台帳](external-input-status.md)§5)。
+本番の日次バックアップは`mirai-web-cad-backup.timer`(systemd、毎日03:10 JST)が担い、`/var/backups/mirai-web-cad/postgres/`へ保存します(保持14日)。詳細は[ローカルデプロイ運用メモ](deployment-local.md)を参照。暫定目標はRPO 24時間、RTO 4時間。オフサイト転送は、ageで暗号化してCloudflare R2へ毎日転送し(保持90日)、バックアップ関連のユニットが失敗するとGitHub Issueで通知する仕組みです。**ただし、R2 token・age鍵・ユニットの設置と初回試験が完了するまでは未稼働**で、オフサイトの複製は存在しません(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「オフサイト転送と失敗通知」、決定事項は[外部入力・確定待ち台帳](external-input-status.md)§5)。
 
 ## 合成監視・障害Issue自動起票
 

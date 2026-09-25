@@ -53,7 +53,8 @@ case "$1" in
   lsjson)
     dst="$(map "$3")"
     [[ -e "$dst" ]] || exit 3
-    printf '{"Path":"x","Name":"x","Size":%s,"IsDir":false}\\n' "$(stat -c %s "$dst")" ;;
+    # 実物のrcloneと同じく、整形したJSONを出力する。
+    printf '{\\n\\t"Path": "x",\\n\\t"Name": "x",\\n\\t"Size": %s,\\n\\t"IsDir": false\\n}\\n' "$(stat -c %s "$dst")" ;;
 esac`);
     const recipients = path.join(root, "recipients.txt");
     writeFileSync(recipients, "age1examplepublickeyonly\n");
@@ -120,6 +121,17 @@ test("a stale latest backup is not uploaded as if it were new", () => {
     assert.deepEqual(uploaded("production"), []);
     // 他方の転送は続ける。
     assert.deepEqual(uploaded("mvp"), ["mirai-web-cad-new.dump.tar.age"]);
+  });
+});
+
+test("a backup just over the age limit is not rounded down and accepted", () => {
+  withSandbox(({ prod, mvp, run, uploaded }) => {
+    backup(prod, "mirai-web-cad-edge.dump", { hoursAgo: 36 + 5 / 60 });
+    backup(mvp, "mirai-web-cad-new.dump");
+    const result = run();
+    assert.equal(result.status, 1);
+    assert.match(result.output, /\[production\] 最新のバックアップが36時間前/);
+    assert.deepEqual(uploaded("production"), []);
   });
 });
 

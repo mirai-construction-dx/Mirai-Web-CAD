@@ -19,7 +19,11 @@ async function withGithub(openIssues, fn) {
     request.on("end", () => {
       requests.push({ method: request.method, url: request.url, auth: request.headers.authorization, body: body ? JSON.parse(body) : null });
       response.setHeader("content-type", "application/json");
-      if (request.method === "GET") return response.end(JSON.stringify(openIssues));
+      if (request.method === "GET") {
+        const page = Number(new URL(request.url, "http://x").searchParams.get("page") ?? "1");
+        const issues = typeof openIssues === "function" ? openIssues(page) : page === 1 ? openIssues : [];
+        return response.end(JSON.stringify(issues));
+      }
       if (request.url.endsWith("/comments")) return response.end(JSON.stringify({ id: 1 }));
       response.end(JSON.stringify({ number: 42 }));
     });
@@ -104,4 +108,14 @@ test("every backup, freshness check, restore drill and offsite unit notifies on 
   const template = readFileSync(path.join(dir, "mirai-web-cad-notify-failure@.service"), "utf8");
   assert.match(template, /^ExecStart=\/usr\/bin\/env node scripts\/notify-failure\.mjs %i$/m);
   assert.doesNotMatch(template, /OnFailure=/, "the notifier must not notify about itself");
+});
+
+test("an open notification issue on a later page is found instead of creating a duplicate", async () => {
+  const filler = Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, title: `other ${i}` }));
+  const pages = (page) => (page === 1 ? filler : page === 2 ? [{ number: 5, title: issueTitle("mirai-web-cad-backup.service") }] : []);
+  await withGithub(pages, async ({ api, requests }) => {
+    const outcome = await notifyFailure({ unit: "mirai-web-cad-backup.service", repo: "o/r", token: TOKEN, api, result: "Result=exit-code" });
+    assert.deepEqual(outcome, { action: "commented", number: 5 });
+    assert.deepEqual(requests.filter((entry) => entry.method === "POST").map((entry) => entry.url), ["/repos/o/r/issues/5/comments"]);
+  });
 });

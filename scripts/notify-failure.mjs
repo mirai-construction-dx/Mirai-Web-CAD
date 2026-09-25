@@ -13,6 +13,7 @@ import { hostname } from "node:os";
 
 const UNIT_PATTERN = /^mirai-web-cad-[a-z0-9-]+\.(service|timer)$/;
 export const TITLE_PREFIX = "[運用通知]";
+const MAX_PAGES = 20;
 
 export function readToken(file, variable) {
   const line = readFileSync(file, "utf8")
@@ -83,8 +84,13 @@ export async function notifyFailure({ unit, repo, token, api = "https://api.gith
   if (!UNIT_PATTERN.test(unit)) throw new Error(`通知対象外のユニット名です: ${unit}`);
   const title = issueTitle(unit);
   const body = issueBody(unit, result, at);
-  const open = await github(api, token, "GET", `/repos/${repo}/issues?state=open&per_page=100`);
-  const existing = open.find((issue) => !issue.pull_request && issue.title === title);
+  let existing;
+  // 未解決のIssueが100件を超えても重複を作らないよう、全ページを確認する。
+  for (let page = 1; page <= MAX_PAGES && !existing; page += 1) {
+    const open = await github(api, token, "GET", `/repos/${repo}/issues?state=open&per_page=100&page=${page}`);
+    existing = open.find((issue) => !issue.pull_request && issue.title === title);
+    if (open.length < 100) break;
+  }
   if (existing) {
     await github(api, token, "POST", `/repos/${repo}/issues/${existing.number}/comments`, { body });
     return { action: "commented", number: existing.number };

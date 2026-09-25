@@ -50,9 +50,10 @@ for source in $OFFSITE_SOURCES; do
     status=1
     continue
   fi
-  age_hours=$(( ($(date +%s) - $(stat -c %Y "$dump")) / 3600 ))
-  if (( age_hours > max_age_hours )); then
-    echo "[$prefix] 最新のバックアップが${age_hours}時間前のもので古すぎます(上限${max_age_hours}時間): $name" >&2
+  # 時間へ丸める前の秒で比べる(丸めると上限を最大59分超えたものを受け入れてしまう)。
+  age_seconds=$(( $(date +%s) - $(stat -c %Y "$dump") ))
+  if (( age_seconds > max_age_hours * 3600 )); then
+    echo "[$prefix] 最新のバックアップが$(( age_seconds / 3600 ))時間前のもので古すぎます(上限${max_age_hours}時間): $name" >&2
     status=1
     continue
   fi
@@ -67,7 +68,8 @@ for source in $OFFSITE_SOURCES; do
   fi
   # ageの出力長は平文の長さと受信者数だけで決まるため、既に転送済みの場合もサイズで照合できる。
   local_size="$(stat -c %s "$encrypted")"
-  remote_size="$(rclone lsjson --stat "$target" 2>/dev/null | sed -n 's/.*"Size":\([0-9]*\).*/\1/p' | head -n 1)"
+  # rcloneは整形したJSON("Size": 123)を出力するため、JSONとして読む。
+  remote_size="$(rclone lsjson --stat "$target" 2>/dev/null | jq -r '.Size // empty' 2>/dev/null || true)"
   if [[ "$remote_size" != "$local_size" ]]; then
     echo "[$prefix] 転送後のサイズが一致しません(手元 ${local_size} / リモート ${remote_size:-なし}): $target" >&2
     status=1
