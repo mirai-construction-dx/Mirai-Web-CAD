@@ -692,7 +692,25 @@ async function getDrawing(store, id) {
 async function getPublicDrawing(store, id) {
   const drawing = await store.getPublicDrawing(id);
   if (!drawing) throw httpError("公開図面が見つかりません。", 404);
-  return drawing;
+  return redactPublicDrawing(drawing);
+}
+
+// 匿名で読める公開図面から、利用者を特定できる値(Cloudflare Accessのメールアドレス等)を除く
+// (独立レビュー M-1)。操作者を表す項目は変更履歴のコマンド内の図形まで含めてどの階層でも、
+// 役割名・system・agent 以外なら "user" に置き換える。
+const PUBLIC_ACTOR_LABELS = new Set(["system", "agent", "user", ...Object.keys(ROLE_POLICIES)]);
+const IDENTITY_KEYS = new Set(["actor", "author", "createdBy"]);
+
+function publicActor(value) {
+  return typeof value === "string" && PUBLIC_ACTOR_LABELS.has(value) ? value : "user";
+}
+
+export function redactPublicDrawing(value) {
+  if (Array.isArray(value)) return value.map(redactPublicDrawing);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, IDENTITY_KEYS.has(key) ? publicActor(item) : redactPublicDrawing(item)])
+  );
 }
 
 async function getAgentRun(store, id) {
