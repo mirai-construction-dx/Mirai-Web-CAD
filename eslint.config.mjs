@@ -103,10 +103,10 @@ const bugDetectionRules = {
   "no-unsafe-optional-chaining": "error",
   "no-unused-vars": ["error", { args: "none", caughtErrors: "none", ignoreRestSiblings: true }],
   "no-useless-backreference": "error",
-  // ブラウザUIのイベントハンドラがawaitの後でモジュールスコープのstateを更新する形は
-  // 単一スレッドのUIでは通常の書き方であり、本規則は誤検知が多い。可視化のみ行い
-  // CIはブロックしない(warn)。将来的に状態管理を見直す際の手がかりとして残す。
-  "require-atomic-updates": "warn",
+  // awaitを挟んだ変数の再代入(本当の競合)は検出し続ける。単一のstateオブジェクトへの
+  // プロパティ代入はallowPropertiesで対象外にする。応答待ちの間に図面が切り替わった場合の
+  // 上書きは、src/app.jsのdrawingEpoch/isStaleDrawingResponseで応答を破棄して防いでいる。
+  "require-atomic-updates": ["warn", { allowProperties: true }],
   "use-isnan": "error",
   "valid-typeof": "error"
 };
