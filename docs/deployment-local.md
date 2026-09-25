@@ -185,9 +185,17 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`mainブランチをfast-forward → npm ci → build → db:check → systemctl restart → health確認`を行い、DB検証またはhealth確認に失敗した場合は直前のコミットへ自動ロールバックする。
+2026-09-25〜(独立レビュー H-1)、次の順で行う。本番とMVPは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
 
-fast-forwardでこのスクリプト自体が更新された場合は、新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
+1. 対象commit(origin/main)を`.releases/<sha>/`へ`git archive`で書き出し、そこで`npm ci --ignore-scripts`と`npm run build`(`BUILD_COMMIT`を`dist/build-info.json`へ記録)を行う
+2. 本番DB・MVP DBへ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は`~/.config/mirai-web-cad/mvp.env`の`DATABASE_URL`(または環境変数`MVP_DATABASE_URL`)。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
+3. 作業ツリーをfast-forwardし、`dist`と`node_modules`を`.releases/<sha>/`へのsymlinkとして一度の操作(rename)で切り替える。初回だけ、実体のディレクトリを`.releases/legacy-<直前のcommit>/`へ退避する
+4. 本番とMVPを再起動し、両方の`/api/health`で`deploy.commit`(サーバーのコード)と`deploy.distCommit`(配信物のbuild元)が対象commitと一致することを確認する
+5. 手順3以降で失敗した場合は、作業ツリー・symlinkを直前の状態へ戻し、両サービスを再起動して直前のcommitで一致することを確認する(ロールバック中は途中の失敗で止めず、各手順の結果を出力する)
+
+`.releases/`には直近3件のリリース(と直前の向き先)を残す。`npm run deploy:drift -- --url http://127.0.0.1:18812`は、稼働commitと配信物のbuild元の不一致も乖離として報告する。
+
+対象commitでこのスクリプト自体が更新される場合は、何も変更しないうちに新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ。新しい手順に構文エラーがあれば何も変えずに中止)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
 
 DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
 
@@ -208,7 +216,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
    ```
 
    `MIGRATION_DATABASE_URL`は所有者ロール等の接続文字列(`production.env`とは別に安全に管理し、リポジトリへ置かない)。
-4. `DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" npm run db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する
+4. 本番DB(`production.env`)とMVP DB(`mvp.env`)の両方で`db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する(`DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/<env>)" npm run db:check`)
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 
