@@ -56,17 +56,23 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-# MVPはユニットが設置されている場合だけ対象にする。接続先は環境ファイルから1変数だけ取り出す
-# (JSON値を含む環境ファイルをsourceすると引用符が壊れるため)。
+# MVPはユニットが設置されている場合だけ対象にする。接続先は、ユニットが実際に読む環境ファイル
+# (EnvironmentFile=)から1変数だけ取り出す。JSON値を含む環境ファイルをsourceすると引用符が
+# 壊れるため sed で読み、systemdと同じく値の外側の引用符を外す。
 mvp_service="mirai-web-cad-mvp.service"
 mvp_enabled=0
 if systemctl cat "$mvp_service" >/dev/null 2>&1; then
   mvp_enabled=1
-  mvp_env_file="${MVP_ENV_FILE:-$HOME/.config/mirai-web-cad/mvp.env}"
-  if [[ -z "${MVP_DATABASE_URL:-}" && -r "$mvp_env_file" ]]; then
+  mvp_env_file="$(systemctl show -p EnvironmentFiles --value "$mvp_service" 2>/dev/null | awk 'NR == 1 { print $1 }' || true)"
+  mvp_env_file="${mvp_env_file:-$HOME/.config/mirai-web-cad/mvp.env}"
+  MVP_DATABASE_URL=""
+  if [[ -r "$mvp_env_file" ]]; then
     MVP_DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' "$mvp_env_file" | head -n 1)"
+    if [[ "$MVP_DATABASE_URL" =~ ^\"(.*)\"$ || "$MVP_DATABASE_URL" =~ ^\'(.*)\'$ ]]; then
+      MVP_DATABASE_URL="${BASH_REMATCH[1]}"
+    fi
   fi
-  if [[ -z "${MVP_DATABASE_URL:-}" ]]; then
+  if [[ -z "$MVP_DATABASE_URL" ]]; then
     echo "${mvp_service} が設置されていますが、MVPのDATABASE_URLを取得できません(${mvp_env_file})。中止します。" >&2
     exit 1
   fi
@@ -76,17 +82,23 @@ fi
 releases_dir=".releases"
 release_rel="$releases_dir/$new_sha"
 mkdir -p "$releases_dir"
-rm -rf "$release_rel.tmp"
-mkdir -p "$release_rel.tmp"
-git archive "$new_sha" | tar -x -C "$release_rel.tmp"
-(
-  cd "$release_rel.tmp"
-  # 本番ホストでパッケージのinstallスクリプトを実行しない(供給網対策)。
-  npm ci --ignore-scripts --no-audit --no-fund
-  BUILD_COMMIT="$new_sha" npm run build
-)
-rm -rf "$release_rel"
-mv "$release_rel.tmp" "$release_rel"
+if [[ -L dist && -L node_modules && "$(readlink dist)" == "$release_rel/dist" \
+  && "$(readlink node_modules)" == "$release_rel/node_modules" ]]; then
+  # 対象commitが既に配信中(再デプロイ)。配信中のリリースを消すと一時的に404になるため再利用する。
+  echo "対象commitのリリースは配信中のため、再buildせずに再利用します: $release_rel"
+else
+  rm -rf "$release_rel.tmp"
+  mkdir -p "$release_rel.tmp"
+  git archive "$new_sha" | tar -x -C "$release_rel.tmp"
+  (
+    cd "$release_rel.tmp"
+    # 本番ホストでパッケージのinstallスクリプトを実行しない(供給網対策)。
+    npm ci --ignore-scripts --no-audit --no-fund
+    BUILD_COMMIT="$new_sha" npm run build
+  )
+  rm -rf "$release_rel"
+  mv "$release_rel.tmp" "$release_rel"
+fi
 
 # 2. 本番DB・MVP DBへ読み取り専用の検証(改善台帳P0-74)。migrationは適用しないため、
 #    migrationを含むリリースは手順書「Migrationを含むリリース」に従って先に適用しておく。
@@ -128,8 +140,10 @@ if [[ "$mvp_enabled" == "1" ]]; then
 fi
 
 # 稼働中のプロセスが、指定commitのサーバーコードと配信物を使っているかを確認する。
+# 第2引数が0なら配信物のbuild元(distCommit)は確認しない。build-info.jsonを持たない以前の
+# 配信物へロールバックした場合は、以前のサーバーがdistCommitを返さないため。
 verify_services() {
-  local expected="$1" entry service port health ok
+  local expected="$1" check_dist="${2:-1}" entry service port health ok
   for entry in "${services[@]}"; do
     service="${entry%%:*}"
     port="${entry##*:}"
@@ -139,7 +153,7 @@ verify_services() {
       health="$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" 2>/dev/null || true)"
       if printf '%s' "$health" | grep -qE '"ok":[[:space:]]*true' \
         && printf '%s' "$health" | grep -qE "\"commit\":[[:space:]]*\"${expected}\"" \
-        && printf '%s' "$health" | grep -qE "\"distCommit\":[[:space:]]*\"${expected}\""; then
+        && { [[ "$check_dist" == "0" ]] || printf '%s' "$health" | grep -qE "\"distCommit\":[[:space:]]*\"${expected}\""; }; then
         ok=1
         break
       fi
@@ -169,7 +183,9 @@ rollback() {
   if [[ -n "$prev_dist" ]]; then point_to dist "$prev_dist" || echo "警告: dist を戻せませんでした" >&2; fi
   if [[ -n "$prev_modules" ]]; then point_to node_modules "$prev_modules" || echo "警告: node_modules を戻せませんでした" >&2; fi
   restart_services || echo "警告: サービスの再起動に失敗しました" >&2
-  if verify_services "$prev_sha"; then
+  local check_dist=1
+  if [[ -n "$prev_dist" && ! -f "$prev_dist/build-info.json" ]]; then check_dist=0; fi
+  if verify_services "$prev_sha" "$check_dist"; then
     echo "ロールバック完了: $prev_sha" >&2
   else
     echo "ロールバック後の確認に失敗しました。docs/runbooks/owner-absence-rollback.md に従い手動で確認してください。" >&2

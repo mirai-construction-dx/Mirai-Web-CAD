@@ -21,7 +21,7 @@ function stub(bin, name, body) {
 }
 
 // v1を稼働中(実体のdist/とnode_modules/あり)として置き、v2をmainへpushした状態を作る。
-function setup(root, { updateScript = (current) => current } = {}) {
+function setup(root, { updateScript = (current) => current, legacyBuildInfo = true } = {}) {
   const origin = path.join(root, "origin.git");
   const work = path.join(root, "work");
   const bin = path.join(root, "bin");
@@ -37,7 +37,7 @@ function setup(root, { updateScript = (current) => current } = {}) {
   const v1 = git(work, "rev-parse", "HEAD");
   // 稼働中のv1: 以前の方式で作業ツリーに直接作られたdistとnode_modules。
   mkdirSync(path.join(work, "dist"));
-  writeFileSync(path.join(work, "dist/build-info.json"), JSON.stringify({ commit: v1 }));
+  if (legacyBuildInfo) writeFileSync(path.join(work, "dist/build-info.json"), JSON.stringify({ commit: v1 }));
   mkdirSync(path.join(work, "node_modules"));
 
   const updater = path.join(root, "updater");
@@ -52,11 +52,19 @@ function setup(root, { updateScript = (current) => current } = {}) {
   const log = path.join(root, "calls.log");
   stub(bin, "npm", `
 case "$1 \${2:-}" in
-  "ci "*) mkdir -p node_modules; echo "$PWD" > node_modules/.installed-in ;;
+  "ci "*) echo "npm ci" >> "${log}"; mkdir -p node_modules; echo "$PWD" > node_modules/.installed-in ;;
   "run build") mkdir -p dist; printf '{"commit":"%s"}' "$BUILD_COMMIT" > dist/build-info.json ;;
   "run db:check") echo "db:check $DATABASE_URL" >> "${log}"; [[ "$DATABASE_URL" == "\${STUB_DBCHECK_FAIL:-none}" ]] && exit 1; exit 0 ;;
 esac`);
-  stub(bin, "systemctl", `[[ "$1" == "cat" && -n "\${STUB_MVP:-}" ]] && exit 0; exit 1`);
+  // MVPのユニットは、systemdと同じく値を引用符で囲んだ環境ファイルを読む想定にする。
+  const mvpEnv = path.join(root, "units/mvp.env");
+  mkdirSync(path.dirname(mvpEnv));
+  writeFileSync(mvpEnv, 'NODE_ENV=production\nDATABASE_URL="postgresql://stub.invalid/mvp"\n');
+  stub(bin, "systemctl", `
+[[ -z "\${STUB_MVP:-}" ]] && exit 1
+[[ "$1" == "cat" ]] && exit 0
+[[ "$1" == "show" ]] && echo "${mvpEnv} (ignore_errors=no)"
+exit 0`);
   stub(bin, "sudo", `echo "sudo $*" >> "${log}"`);
   // healthは作業ツリーのHEADと、dist(symlinkを辿る)のbuild元を返す。STUB_BREAK_COMMITに一致すれば不健全。
   stub(bin, "curl", `
@@ -69,8 +77,7 @@ printf '{"ok":true,"deploy":{"commit":"%s","distCommit":"%s"}}' "$commit" "$dist
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     HOME: root,
-    DATABASE_URL: "postgresql://stub.invalid/prod",
-    MVP_DATABASE_URL: "postgresql://stub.invalid/mvp"
+    DATABASE_URL: "postgresql://stub.invalid/prod"
   };
   return { work, v1, v2, env, log };
 }
@@ -112,7 +119,8 @@ test("deploy builds outside the live tree, switches symlinks and verifies produc
     assert.equal(JSON.parse(readFileSync(path.join(work, `.releases/legacy-${v1}/dist/build-info.json`), "utf8")).commit, v1);
     const recorded = calls(log);
     assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/prod/);
-    assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/mvp/);
+    // MVPはユニットの環境ファイルの値を、外側の引用符を外して使う。
+    assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/mvp$/m);
     assert.match(recorded, /sudo systemctl restart mirai-web-cad.service/);
     assert.match(recorded, /sudo systemctl restart mirai-web-cad-mvp.service/);
     assert.equal(git(work, "status", "--porcelain"), "", "symlinks and releases must be ignored by git");
@@ -171,4 +179,24 @@ test("an updated deploy script with a syntax error aborts without changing anyth
     assert.ok(!lstatSync(path.join(work, "dist")).isSymbolicLink());
     assert.doesNotMatch(calls(log), /systemctl restart/);
   }, { updateScript: (current) => `${current}\nif then\n` });
+});
+
+test("redeploying the live commit reuses its release instead of deleting it", () => {
+  withRepo(({ work, v2, env, log }) => {
+    assert.equal(deploy(work, env).status, 0);
+    const again = deploy(work, env);
+    assert.equal(again.status, 0, again.output);
+    assert.match(again.output, /再利用します/);
+    assert.equal(calls(log).match(/npm ci/g).length, 1);
+    assert.equal(readlinkSync(path.join(work, "dist")), `.releases/${v2}/dist`);
+  });
+});
+
+test("rollback to a legacy dist without build-info.json is verified by health and commit only", () => {
+  withRepo(({ work, v1, v2, env }) => {
+    const result = deploy(work, { ...env, STUB_BREAK_COMMIT: v2 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, new RegExp(`ロールバック完了: ${v1}`));
+    assert.doesNotMatch(result.output, /ロールバック後の確認に失敗/);
+  }, { legacyBuildInfo: false });
 });

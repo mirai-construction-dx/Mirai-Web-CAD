@@ -188,10 +188,10 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.
 2026-09-25〜(独立レビュー H-1)、次の順で行う。本番とMVPは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
 
 1. 対象commit(origin/main)を`.releases/<sha>/`へ`git archive`で書き出し、そこで`npm ci --ignore-scripts`と`npm run build`(`BUILD_COMMIT`を`dist/build-info.json`へ記録)を行う
-2. 本番DB・MVP DBへ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は`~/.config/mirai-web-cad/mvp.env`の`DATABASE_URL`(または環境変数`MVP_DATABASE_URL`)。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
+2. 本番DB・MVP DBへ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は、ユニットの`EnvironmentFile=`(通常`~/.config/mirai-web-cad/mvp.env`)の`DATABASE_URL`(外側の引用符はsystemdと同じく外す)で、サービスが実際に使うDBと同じものを検証する。対象commitが既に配信中の再デプロイでは、配信中のリリースを消さずに再利用する。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
 3. 作業ツリーをfast-forwardし、`dist`と`node_modules`を`.releases/<sha>/`へのsymlinkとして一度の操作(rename)で切り替える。初回だけ、実体のディレクトリを`.releases/legacy-<直前のcommit>/`へ退避する
 4. 本番とMVPを再起動し、両方の`/api/health`で`deploy.commit`(サーバーのコード)と`deploy.distCommit`(配信物のbuild元)が対象commitと一致することを確認する
-5. 手順3以降で失敗した場合は、作業ツリー・symlinkを直前の状態へ戻し、両サービスを再起動して直前のcommitで一致することを確認する(ロールバック中は途中の失敗で止めず、各手順の結果を出力する)
+5. 手順3以降で失敗した場合は、作業ツリー・symlinkを直前の状態へ戻し、両サービスを再起動して直前のcommitで一致することを確認する(ロールバック中は途中の失敗で止めず、各手順の結果を出力する。`build-info.json`を持たない以前の配信物へ戻した場合は、以前のサーバーが`distCommit`を返さないため、healthと稼働commitだけで確認する)
 
 `.releases/`には直近3件のリリース(と直前の向き先)を残す。`npm run deploy:drift -- --url http://127.0.0.1:18812`は、稼働commitと配信物のbuild元の不一致も乖離として報告する。
 
@@ -203,7 +203,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
 
 `db:check`はmigrationを適用しない。検証するのは、スクリプト内の`covered_migrations`に登録したmigration(現在0001〜0008)の適用後状態として明示的に列挙したもの(9テーブル、追加列3、検証済み(`convalidated`)のCHECK制約7、有効(`indisvalid`)な索引7、監査の追記専用トリガ3件と拒否動作、JSONB形状)に限られ、migrationの全作用を網羅するものではない。
 
-新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、直前のコミットへ自動ロールバックされる。
+新しいmigrationを追加するPRは、その適用後状態の検査を`scripts/check-database-state.sh`へ追加し、`covered_migrations`へ登録する。登録のない`migrations/*.sql`があると`db:check`とCI(`tests/deploy-script.test.js`)が失敗するため、検査を追加し忘れたリリースはデプロイ前に止まる。未適用のままデプロイした場合は`db:check`が欠落を列挙してexit 1となり、稼働中の作業ツリー・配信物を何も切り替えずに中止する。
 
 **本番DBへ`db:verify`を実行してはならない**(全migrationに加えて`seeds/demo.sql`を適用し、デモ行の投入・`dwg_demo_001`の上書き・監査トリガの再作成が起きる)。次の順で、対象migrationだけを適用してからデプロイする。
 
