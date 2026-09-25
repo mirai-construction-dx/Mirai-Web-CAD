@@ -213,7 +213,7 @@ test("health は稼働commitを deploy ブロックで報告し、余分な内�
     env
   );
   const body = await response.json();
-  assert.deepEqual(body.deploy, { commit: HEAD, branch: "main", dirty: false });
+  assert.deepEqual(body.deploy, { commit: HEAD, distCommit: null, branch: "main", dirty: false });
   assert.equal("filesystemPath" in body.deploy, false);
 });
 
@@ -225,5 +225,41 @@ test("health は DEPLOY_INFO 未設定でも deploy ブロックを null で返�
     { AUTH_MODE: "access", APP_ENV: "production", ACCESS_JWT_VERIFIER: async () => ({ email: "v@example.com" }) }
   );
   const body = await response.json();
-  assert.deepEqual(body.deploy, { commit: null, branch: null, dirty: null });
+  assert.deepEqual(body.deploy, { commit: null, distCommit: null, branch: null, dirty: null });
+});
+
+test("health は配信物のbuild元commitをリクエストごとに読み直す(symlink切替を再起動なしで反映)", async () => {
+  let distCommit = "a".repeat(40);
+  const env = {
+    AUTH_MODE: "access",
+    APP_ENV: "production",
+    ACCESS_JWT_VERIFIER: async () => ({ email: "viewer@example.com" }),
+    DEPLOY_INFO: { commit: HEAD, branch: "main", dirty: false, distCommit: () => distCommit }
+  };
+  const read = async () => (await (await handleApiRequest(new Request("https://example.test/api/health", { headers: { "cf-access-jwt-assertion": "token" } }), env)).json()).deploy.distCommit;
+  assert.equal(await read(), "a".repeat(40));
+  distCommit = HEAD;
+  assert.equal(await read(), HEAD);
+});
+
+test("check-deploy-drift は稼働commitと配信物のbuild元の不一致を乖離として報告する", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ ok: true, deploy: { commit: HEAD, distCommit: "b".repeat(40) } }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    const { execFile } = await import("node:child_process");
+    const { stdout } = await new Promise((resolve) => {
+      execFile(process.execPath, ["scripts/check-deploy-drift.mjs", "--json", "--url", `http://127.0.0.1:${port}`], { cwd: repoRoot, encoding: "utf8" }, (error, out) => resolve({ error, stdout: out }));
+    });
+    const report = JSON.parse(stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.runningDistCommit, "b".repeat(40));
+    assert.match(report.driftReasons.join("\n"), /配信中の画面のbuild元/);
+  } finally {
+    server.close();
+  }
 });
