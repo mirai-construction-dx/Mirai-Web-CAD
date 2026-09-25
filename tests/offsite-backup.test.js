@@ -135,6 +135,23 @@ test("a backup just over the age limit is not rounded down and accepted", () => 
   });
 });
 
+test("the rclone binary can be pinned so other systems keep the distribution version", () => {
+  withSandbox(({ root, prod, mvp, run, log }) => {
+    backup(prod, "mirai-web-cad-a.dump");
+    backup(mvp, "mirai-web-cad-b.dump");
+    // 既定の rclone(PATH上)は失敗させ、RCLONE_BIN で指定した方だけが使われることを確かめる。
+    const pinned = path.join(root, "pinned");
+    mkdirSync(pinned);
+    writeFileSync(path.join(pinned, "rclone"), `#!/usr/bin/env bash\necho "pinned $1" >> "${log}"\nexec "${path.join(root, "bin", "rclone")}" "$@"\n`);
+    chmodSync(path.join(pinned, "rclone"), 0o755);
+    const result = run({ RCLONE_BIN: path.join(pinned, "rclone") });
+    assert.equal(result.status, 0, result.output);
+    const calls = readFileSync(log, "utf8");
+    assert.equal(calls.match(/^pinned copyto$/gm).length, 2);
+    assert.equal(calls.match(/^pinned lsjson$/gm).length, 2);
+  });
+});
+
 test("a size mismatch after upload fails", () => {
   withSandbox(({ prod, mvp, run }) => {
     backup(prod, "mirai-web-cad-a.dump");

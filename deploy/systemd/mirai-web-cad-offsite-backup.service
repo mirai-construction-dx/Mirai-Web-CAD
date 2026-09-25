@@ -19,6 +19,8 @@ Environment=AGE_RECIPIENTS_FILE=/home/kensan/.config/mirai-web-cad/offsite-age-r
 Environment=MAX_BACKUP_AGE_HOURS=36
 # rcloneに設定ファイルを探させない(接続設定は環境変数だけで与える)。
 Environment=RCLONE_CONFIG=/dev/null
+# 公式版rclone(docs/deployment-local.md の手順0で配置)。配布版v1.60はR2で501を受ける。
+Environment=RCLONE_BIN=/opt/mirai-web-cad/bin/rclone
 Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v22.22.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/bash scripts/offsite-backup.sh
 
