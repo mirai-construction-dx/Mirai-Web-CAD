@@ -101,3 +101,31 @@ test("tangent OSnap snaps the second point to the tangent point on a circle", as
   expect(Math.abs(radius.x * segment.x + radius.y * segment.y) / (800 * Math.hypot(segment.x, segment.y))).toBeLessThan(1e-9);
   expect(Math.hypot(to.x - tangent.x, to.y - tangent.y)).toBeLessThan(5);
 });
+
+test("function keys keep a partial command, and ignore Shift and other input fields", async ({ page }) => {
+  const toggle = (name) => page.locator(".status-toggle", { hasText: name });
+  const input = page.locator("#commandInput");
+  await input.fill("LINE 0,0 1");
+  await input.press("ArrowLeft");
+  await page.keyboard.press("F8");
+  await expect(toggle("直交")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#commandInput")).toHaveValue("LINE 0,0 1");
+  await expect(page.locator("#commandInput")).toBeFocused();
+  // Shift付きは対象外。
+  await page.keyboard.press("Shift+F8");
+  await expect(toggle("直交")).toHaveAttribute("aria-pressed", "true");
+  // 操作値の入力欄では切り替えず、入力値も失わない。
+  const operationValue = page.locator("#operationForm [name=value]");
+  await operationValue.fill("500,0");
+  await operationValue.focus();
+  await page.keyboard.press("F8");
+  await expect(toggle("直交")).toHaveAttribute("aria-pressed", "true");
+  await expect(operationValue).toHaveValue("500,0");
+});
+
+test("LASTPOINT is cleared when the drawing is reset", async ({ page }) => {
+  await command(page, "LINE 0,0 100,0");
+  await page.getByRole("button", { name: "デモ初期化" }).click();
+  await command(page, "LINE @10,0 50,0");
+  await expect(page.getByLabel("コマンドログ")).toContainText("直前の点(LASTPOINT)がありません");
+});

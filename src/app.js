@@ -1514,7 +1514,10 @@ async function executeCommandLine(event) {
       lastPoint: state.lastPoint
     });
     if (parsed.kind === "transaction") {
-      if ((await commitCommands(`CLI ${parsed.label}`, parsed.commands)) && parsed.lastPoint) state.lastPoint = parsed.lastPoint;
+      const lastPointAtSubmit = state.lastPoint;
+      const committed = await commitCommands(`CLI ${parsed.label}`, parsed.commands);
+      // 確定を待つ間にCanvasで新しい点を入力していたら、その点を古いコマンドの最終点で上書きしない。
+      if (committed && parsed.lastPoint && state.lastPoint === lastPointAtSubmit) state.lastPoint = parsed.lastPoint;
       return;
     }
     if (parsed.lastPoint) state.lastPoint = parsed.lastPoint;
@@ -1691,6 +1694,8 @@ function fitCameraToDrawing() {
 }
 
 function resetAuthoringState() {
+  // 前の図面で入力した点を、新しい図面の先頭@の基準にしない。
+  state.lastPoint = null;
   state.currentLayerId = state.drawing.layers.some((layer) => layer.id === "layer-structure")
     ? "layer-structure"
     : state.drawing.layers[0]?.id;
@@ -2961,7 +2966,10 @@ async function checkApiHealth() {
     const roleLocked = body.auth.mode !== "demo";
     const selectedRole = roleLocked ? body.auth.role : state.drawing.currentRole;
     const drawingChanged = drawingBody.drawing.id !== state.drawing.id;
-    if (drawingChanged) state.layoutDraft = null;
+    if (drawingChanged) {
+      state.layoutDraft = null;
+      state.lastPoint = null;
+    }
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。
     // 同じ図面の再同期で、利用者が今見ている表示を古い記憶位置へ戻さない。
@@ -3293,13 +3301,28 @@ applyTheme(state.settings.theme);
 // 表示寸法の変化でbacking storeを追従させる(カメラは維持)。
 window.addEventListener("resize", () => drawCanvas());
 window.addEventListener("pagehide", flushViewSave);
-// F3/F7/F8/F9で作図補助を切り替える(ダイアログ表示中は対象外)。ブラウザ既定動作(F3の検索等)は抑止する。
+// F3/F7/F8/F9で作図補助を切り替える。対象はCanvas・コマンド欄にフォーカスがある(または何も選ばれていない)
+// ときだけで、ダイアログ表示中・修飾キー付き・キーリピートは除く。ブラウザ既定動作(F3の検索等)は抑止する。
 document.addEventListener("keydown", (event) => {
   const key = DRAFTING_FUNCTION_KEYS[event.key];
-  if (!key || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!key || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
   if (document.querySelector("dialog[open]")) return;
+  const active = document.activeElement;
+  const commandInput = /** @type {HTMLInputElement | null} */ (document.querySelector("#commandInput"));
+  const onCommand = active !== null && active === commandInput;
+  if (!(active === null || active === document.body || active?.id === "cadCanvas" || onCommand)) return;
   event.preventDefault();
+  // renderでコマンド欄は作り直されるため、入力途中の文字と選択範囲を引き継ぐ。
+  const draft = onCommand && commandInput ? { value: commandInput.value, start: commandInput.selectionStart, end: commandInput.selectionEnd } : null;
+  if (draft) state.focusTarget = "command";
   toggleSetting(key);
+  if (draft) {
+    const restored = /** @type {HTMLInputElement | null} */ (document.querySelector("#commandInput"));
+    if (restored) {
+      restored.value = draft.value;
+      restored.setSelectionRange(draft.start, draft.end);
+    }
+  }
 });
 render();
 checkApiHealth();
