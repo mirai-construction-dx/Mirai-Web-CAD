@@ -1655,6 +1655,8 @@ function flushViewSave() {
 
 /** 図面の切替(デモ初期化・新規作成・APIからの別図面読込)ごとに進む世代。 */
 let drawingEpoch = 0;
+/** AI Previewの要求ごとに進む番号。最新の要求の完了だけがaiBusyを解除する。 */
+let aiPreviewRequestToken = 0;
 
 // API応答を待つ間に別の図面へ切り替わっていたら、古い図面向けの応答を今の図面へ適用しない。
 function isStaleDrawingResponse(epoch, label) {
@@ -2416,6 +2418,7 @@ function snapshotCommands(current, target) {
 async function planAiProposal() {
   const promptInput = /** @type {HTMLTextAreaElement} */ (document.querySelector("#aiPrompt"));
   const promptValue = promptInput.value;
+  const requestToken = ++aiPreviewRequestToken;
   state.aiBusy = true;
   state.aiError = null;
   render();
@@ -2427,7 +2430,8 @@ async function planAiProposal() {
         body: JSON.stringify({ prompt: promptValue })
       });
       if (epoch !== drawingEpoch) {
-        state.aiBusy = false;
+        // 図面切替後に新しいPreviewを始めていれば、その処理中表示は解除しない。
+        if (requestToken === aiPreviewRequestToken) state.aiBusy = false;
         isStaleDrawingResponse(epoch, "AI Preview");
         return;
       }
@@ -2435,7 +2439,7 @@ async function planAiProposal() {
       state.previewRunId = body.run.id;
       state.aiEngine = body.run.proposal?.engine ?? "rule";
     } catch (error) {
-      state.aiBusy = false;
+      if (requestToken === aiPreviewRequestToken) state.aiBusy = false;
       if (isStaleDrawingResponse(epoch, "AI Preview")) return;
       state.aiError = errorMessage(error);
       log(`AI Preview失敗: ${errorMessage(error)}`);
