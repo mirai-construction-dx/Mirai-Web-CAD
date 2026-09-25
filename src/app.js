@@ -1426,7 +1426,7 @@ async function createNewDrawingFromForm(event) {
   const unit = String(data.get("unit") ?? "mm");
   const template = String(data.get("template") ?? "blank");
   const role = state.drawing.currentRole;
-  drawingEpoch += 1;
+  const epoch = drawingEpoch;
   try {
     if (state.apiStatus.connected) {
       const body = await apiRequest("/api/drawings", {
@@ -1434,8 +1434,12 @@ async function createNewDrawingFromForm(event) {
         headers: idempotencyHeaders(),
         body: JSON.stringify({ name, unit, template })
       });
+      // 作成要求中に別の図面へ切り替えていたら、作成結果で上書きしない(図面はサーバーに作成済み)。
+      if (isStaleDrawingResponse(epoch, "新規図面作成")) return;
+      drawingEpoch += 1;
       state.drawing = { ...body.drawing, currentRole: role };
     } else {
+      drawingEpoch += 1;
       state.drawing = template === "demo" ? seedDrawing() : createDrawing();
       state.drawing.id = `dwg_${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? Date.now()}`;
       state.drawing.name = name;
@@ -1447,6 +1451,7 @@ async function createNewDrawingFromForm(event) {
     /** @type {HTMLDialogElement} */ (document.querySelector("#newDrawingDialog")).close();
     persist(`新規図面作成: ${name}`);
   } catch (error) {
+    if (isStaleDrawingResponse(epoch, "新規図面作成")) return;
     log(`新規図面作成失敗: ${errorMessage(error)}`);
     render();
   }
@@ -1668,6 +1673,8 @@ function fitCameraToDrawing() {
 }
 
 function resetAuthoringState() {
+  // 前の図面向けのAI Preview待ちは破棄されるため、入力欄を使える状態へ戻す。
+  state.aiBusy = false;
   state.currentLayerId = state.drawing.layers.some((layer) => layer.id === "layer-structure")
     ? "layer-structure"
     : state.drawing.layers[0]?.id;
@@ -2330,8 +2337,10 @@ async function undoLastTransaction() {
   }
   const current = structuredClone(state.drawing);
   state.redoStack.push(current);
+  const epoch = drawingEpoch;
   const succeeded = await commitCommands("UNDO", snapshotCommands(state.drawing, target), { recordHistory: false });
-  if (!succeeded) {
+  // 図面が切り替わった後は新しい図面の履歴に触れない(前の図面の状態を復元しない)。
+  if (!succeeded && epoch === drawingEpoch) {
     state.redoStack.pop();
     state.undoStack.push(target);
   }
@@ -2346,8 +2355,9 @@ async function redoLastTransaction() {
   }
   const current = structuredClone(state.drawing);
   state.undoStack.push(current);
+  const epoch = drawingEpoch;
   const succeeded = await commitCommands("REDO", snapshotCommands(state.drawing, target), { recordHistory: false });
-  if (!succeeded) {
+  if (!succeeded && epoch === drawingEpoch) {
     state.undoStack.pop();
     state.redoStack.push(target);
   }
@@ -2416,8 +2426,9 @@ async function planAiProposal() {
         method: "POST",
         body: JSON.stringify({ prompt: promptValue })
       });
-      if (isStaleDrawingResponse(epoch, "AI Preview")) {
+      if (epoch !== drawingEpoch) {
         state.aiBusy = false;
+        isStaleDrawingResponse(epoch, "AI Preview");
         return;
       }
       state.previewProposal = body.run.proposal;
@@ -2425,6 +2436,7 @@ async function planAiProposal() {
       state.aiEngine = body.run.proposal?.engine ?? "rule";
     } catch (error) {
       state.aiBusy = false;
+      if (isStaleDrawingResponse(epoch, "AI Preview")) return;
       state.aiError = errorMessage(error);
       log(`AI Preview失敗: ${errorMessage(error)}`);
       render();

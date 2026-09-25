@@ -29,6 +29,12 @@ echo "デプロイ対象: $new_sha"
 # 旧手順のdb:verifyが走った事故の再発防止)。再実行は1回だけ。
 if [[ "${DEPLOY_REEXECUTED:-}" != "1" ]] && ! git diff --quiet "$prev_sha" "$new_sha" -- scripts/deploy-local.sh; then
   echo "デプロイ手順(scripts/deploy-local.sh)が更新されたため、新しい手順で再実行します。"
+  # execで置き換えた後の新スクリプトが起動できないと、ロールバックの仕組みごと失われる。事前に構文を確かめる。
+  if ! bash -n scripts/deploy-local.sh; then
+    echo "更新後のデプロイ手順に構文エラーがあります。${prev_sha} へ戻して中止します。" >&2
+    git checkout --quiet "$prev_sha"
+    exit 1
+  fi
   DEPLOY_REEXECUTED=1 DEPLOY_PREV_SHA="$prev_sha" exec bash scripts/deploy-local.sh
 fi
 
