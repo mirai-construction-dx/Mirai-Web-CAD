@@ -28,8 +28,8 @@
 | main直接push禁止・必須CI | 充足 | Branch Protection(必須チェック5件+strict)とRuleset(必須チェック10件) |
 | ActionのSHA固定、Secret Scan | 充足 | `.github/workflows/ci.yml` |
 | SBOM | 一部 | CycloneDX SBOMはCIで生成。署名・Attestationは無い |
-| マージ前の人間レビュー(通常2名/重要3名) | 組織決定どおり(見直し待ち) | 組織の開発ガバナンス(Portfolio `docs/operations/PORT-GOV-001`、Core ADR-0016)でWeb-CADは**B型(品質ゲートを満たせば自動マージ、承認0)**。低リスクの変更は品質ゲート(必須チェック等)だけでマージでき、オーナーのY/Nは高リスク変更(PORT-GOV-001 §5: 認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)に限る。2026-09-25時点では、オーナーの指示により全マージでY/Nを取得している(運用上の追加措置で、規則上の要件ではない)。V3.6の2名/3名は、2人目(security-reviewers、2026-09-28提示予定)の参加後にADR-0016の見直し条件で再判断 |
-| CODEOWNERSはTeam指定 | 組織決定どおり | PORT-GOV-001 §2.2でB型のRepositoryにCODEOWNERSは不要(承認を要求しないため)。`.github/CODEOWNERS`(個人)は既存のまま。承認型への変更時にTeam(Write以上)で整備する |
+| マージ前の人間レビュー(通常2名/重要3名) | 決定(B型を継続、Botは代替にしない) | 組織の開発ガバナンス(Portfolio `docs/operations/PORT-GOV-001`、Core ADR-0016)でWeb-CADは**B型(品質ゲートを満たせば自動マージ、承認0)**。低リスクの変更は品質ゲート(必須チェック等)だけでマージでき、オーナーのY/Nは高リスク変更(PORT-GOV-001 §5: 認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)に限る。2026-09-25時点では、オーナーの指示により全マージでY/Nを取得している(運用上の追加措置で、規則上の要件ではない)。V3.6の2名/3名は、2人目(security-reviewers、2026-09-28提示予定)の参加後にADR-0016の見直し条件で再判断 |
+| CODEOWNERSはTeam指定 | 決定(B型のため置かない) | PORT-GOV-001 §2.2でB型のRepositoryにCODEOWNERSは不要(承認を要求しないため)。`.github/CODEOWNERS`(個人)は既存のまま。承認型への変更時にTeam(Write以上)で整備する |
 | AIの結果の反映に人間承認(承認者の分離・承認記録) | **未充足** | 反映には利用者の明示操作が必要だが、編集権限があれば誰でも適用でき、オフライン時は承認記録を残さない([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)) |
 | AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **承認済み例外(期限付き)** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(承認済み、見直し期限2026-12-25) |
 | Coreの版付き成果物を版・digest固定で取り込む(`core-lock/`等) | 未対応(現時点で利用対象なし) | Web-CADはCoreの契約(event/evidence/MCP)をまだ使っていない。取込み時の手順は§3 |
@@ -39,7 +39,7 @@
 | 確定版をCDEへ登録 | 未対応 | CDE連携なし。承認済み版はWeb-CAD内で保持 |
 | UI→Agent→Tool→DBまで相関IDを維持 | 一部 | APIは`x-request-id`を受け取り応答へ返す(`src/api-handler.js`)。監査・AI Runへの保存と下流への伝搬は未対応 |
 | 証跡の共通項目(Core evidence schema) | 一部 | 対応表は§4 |
-| 技術標準(OS・アプリ選定 V3.5) | 不整合(適用範囲が不明) | PostgreSQL 16、Node 22(CI)/`engines >=20`、vanilla JS、実行時にNode APIを使用。[ADR-0004](../adr/ADR-0004-tech-stack-vs-os-selection.md)(提案) |
+| 技術標準(OS・アプリ選定 V3.5) | 承認済み例外・更新計画あり | PostgreSQL 16、Node 22(CI)/`engines >=20`、vanilla JS、実行時にNode APIを使用。[ADR-0004](../adr/ADR-0004-tech-stack-vs-os-selection.md)(承認済み: アプリ構成は例外として維持、Node 24へ2027-01-31・PostgreSQL 18へ2027-11-30までに更新) |
 | SSOはEntra ID → Cloudflare Access | 一部 | Cloudflare Accessは稼働。Entra連携の実装(`src/entra-graph.js`)はあるが対象利用者のtenant登録は未完了(台帳§2) |
 
 ## 3. Coreの版付き成果物を取り込むときの手順(未実施)
