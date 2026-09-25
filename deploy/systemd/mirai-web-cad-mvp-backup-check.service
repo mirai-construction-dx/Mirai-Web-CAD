@@ -1,6 +1,9 @@
 [Unit]
 Description=Mirai Web CAD MVP backup freshness check
 
+# 失敗時はGitHub Issueで通知する(独立レビュー H-3)。
+OnFailure=mirai-web-cad-notify-failure@%n.service
+
 [Service]
 Type=oneshot
 User=kensan

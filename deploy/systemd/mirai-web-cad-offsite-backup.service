@@ -1,0 +1,39 @@
+[Unit]
+Description=Mirai Web CAD encrypted offsite backup transfer (Cloudflare R2)
+Documentation=https://github.com/mirai-construction-dx/Mirai-Web-CAD/blob/main/docs/deployment-local.md
+After=network-online.target
+Wants=network-online.target
+OnFailure=mirai-web-cad-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=kensan
+Group=kensan
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
+# R2の接続設定と資格情報(RCLONE_CONFIG_R2_*、mode 0600、Git管理外)。
+EnvironmentFile=/home/kensan/.config/mirai-web-cad/offsite.env
+Environment="OFFSITE_SOURCES=/var/backups/mirai-web-cad/postgres:production /var/backups/mirai-web-cad/mvp-postgres:mvp"
+Environment=OFFSITE_REMOTE=r2:mirai-web-cad-backups
+# 暗号化の受信者(公開鍵のみ)。復号鍵はホストに置かない。
+Environment=AGE_RECIPIENTS_FILE=/home/kensan/.config/mirai-web-cad/offsite-age-recipients.txt
+Environment=MAX_BACKUP_AGE_HOURS=36
+# rcloneに設定ファイルを探させない(接続設定は環境変数だけで与える)。
+Environment=RCLONE_CONFIG=/dev/null
+Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v22.22.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/bash scripts/offsite-backup.sh
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

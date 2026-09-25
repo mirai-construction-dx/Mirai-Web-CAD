@@ -245,7 +245,7 @@ RESTORE_DATABASE_URL="postgresql://empty-recovery-db" \
 - archiveは`umask 077`で作成し、Gitへ追加しない
 - 復元後に件数だけでなく、実ブラウザでデモ取得、作図、再読込を確認する
 
-本番の日次バックアップは`mirai-web-cad-backup.timer`(systemd、毎日03:10 JST)が担い、`/var/backups/mirai-web-cad/postgres/`へ保存します(保持14日)。詳細は[ローカルデプロイ運用メモ](deployment-local.md)を参照。暫定目標はRPO 24時間、RTO 4時間。オフサイト転送(R2等)は未実施で、保存先・暗号鍵・保持期間・費用・復元責任者の合意が別途必要です。
+本番の日次バックアップは`mirai-web-cad-backup.timer`(systemd、毎日03:10 JST)が担い、`/var/backups/mirai-web-cad/postgres/`へ保存します(保持14日)。詳細は[ローカルデプロイ運用メモ](deployment-local.md)を参照。暫定目標はRPO 24時間、RTO 4時間。オフサイト転送は、ageで暗号化してCloudflare R2へ毎日転送し(保持90日)、バックアップ関連のユニットが失敗するとGitHub Issueで通知する仕組みです。**ただし、R2 token・age鍵・ユニットの設置と初回試験が完了するまでは未稼働**で、オフサイトの複製は存在しません(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「オフサイト転送と失敗通知」、決定事項は[外部入力・確定待ち台帳](external-input-status.md)§5)。
 
 ## 合成監視・障害Issue自動起票
 
@@ -343,5 +343,5 @@ IT/DX 7名での運用を想定した枠組み。**当番の実名・連絡先�
 - 本番サービスがこのホストの稼働・ネットワークに依存する。ホスト停止・ネットワーク断で本番が停止する
 - `mirai-web-cad.service`のsystemdユニットは`IPAddressDeny=any`を採用していない(Cloudflare Access JWKS取得の外向きHTTPSに必要なため)。インバウンド制限は`127.0.0.1`バインドと`RestrictAddressFamilies`で担保している
 - CI(GitHub Actions)からはこのホストへ直接デプロイできないため、デプロイは`scripts/deploy-local.sh`の手動実行に依存する。self-hosted runner化は将来の別Issueとする
-- バックアップのオフサイト転送(R2等)は未実施
+- バックアップのオフサイト転送と失敗通知は、設置(R2 token・age鍵・ユニット)と初回試験の完了までは未稼働([外部入力・確定待ち台帳](external-input-status.md)§5)
 - OpenDesign外部正本へ接続する手段は現環境にないため、リポジトリ内仕様HTMLとの整合を正本として確認中
