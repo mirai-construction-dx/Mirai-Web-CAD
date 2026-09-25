@@ -274,7 +274,9 @@ journalctl -u mirai-web-cad-backup.service -n 20
 オフサイトからの復元(隔離DBへ):
 
 ```bash
+umask 077                                                             # 平文を他ユーザーから読めないようにする
 work="$(mktemp -d)"                                                   # 展開は必ず専用の空ディレクトリで行う
+trap 'rm -rf "$work"' EXIT                                           # 終了時(失敗時も)に平文のdumpを消す
 rclone copyto r2:mirai-web-cad-backups/production/<name>.dump.tar.age "$work/in.tar.age"   # offsite.env の変数を渡して実行
 age -d -i <オーナーが保管する復号鍵> "$work/in.tar.age" > "$work/in.tar"
 tar -tf "$work/in.tar"                                                # <name>.dump と <name>.dump.manifest の2件だけであることを確認
@@ -283,7 +285,7 @@ RESTORE_DATABASE_URL=<隔離DB> BACKUP_FILE="$work/<name>.dump" ALLOW_DATABASE_R
   bash scripts/restore-database.sh
 ```
 
-ageの暗号化は機密性を守るが、作成元は証明しない(公開鍵を知る者は誰でも暗号化できる)。R2への書込権限は転送用tokenだけに限り、そのtokenを他の用途・主体と共有しない。展開前に中身の一覧を確かめ、作業ディレクトリ以外へは展開しない。
+復号した平文(`in.tar`と展開したdump)は作業ディレクトリにだけ置き、復元が終わったらシェルを閉じて(`trap`で)消す。ageの暗号化は機密性を守るが、作成元は証明しない(公開鍵を知る者は誰でも暗号化できる)。R2への書込権限は転送用tokenだけに限り、そのtokenを他の用途・主体と共有しない。展開前に中身の一覧を確かめ、作業ディレクトリ以外へは展開しない。
 
 ### 本番DBの復元ドリル(初回セットアップが必要)
 
