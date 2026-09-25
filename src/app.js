@@ -27,7 +27,7 @@ import { exportDxf } from "./dxf-export.js";
 import { arrayEntity, blockEntity, breakEntity, chamferLines, createBoundaryEntity, dimensionEntity, editPolyline, extendEntityToBoundary, filletLines, hatchEntity, joinLines, measurePoints, mirrorEntity, offsetEntity, transformEntity, trimEntityToBoundaries } from "./cad-advanced.js";
 import { applyOrtho, DEFAULT_OSNAP_MODES, findOsnapPoint } from "./cad-draft-helpers.js";
 import { buildSpatialIndex, queryBounds } from "./spatial-index.js";
-import { boundsIntersectView, boundsVisibleInView, cameraToSavedView, canvasViewSize, keepCenterOnResize, parseSavedViews, rememberSavedView, savedViewToCamera, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
+import { boundsIntersectView, boundsVisibleInView, cameraForWindow, cameraToSavedView, pushViewHistory, zoomCameraAtCenter, canvasViewSize, keepCenterOnResize, parseSavedViews, rememberSavedView, savedViewToCamera, clampCameraScale, DEFAULT_CANVAS_SIZE, displayGridStep, fitCameraToBounds, formatZoomPercent, syncCanvasBackingSize } from "./cad-view.js";
 import { entityGrips, moveGrip, selectableEntities, selectInBox } from "./cad-selection.js";
 import { dimensionGeometry } from "./cad-dimension.js";
 import { selectByPath } from "./cad-selection-tools.js";
@@ -171,6 +171,8 @@ const ICONS = {
   zoomext: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9 9h6v6H9z",
   zoomin: "M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM14.5 14.5L20 20M10 7v6M7 10h6",
   zoomout: "M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM14.5 14.5L20 20M7 10h6",
+  zoomwin: "M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM14.5 14.5L20 20M7 7h6v6H7z",
+  zoomprev: "M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM14.5 14.5L20 20M12 7l-3 3 3 3",
   pan: "M12 3l2.5 3h-5L12 3zM12 21l2.5-3h-5l2.5 3M3 12l3-2.5v5L3 12zM21 12l-3-2.5v5l3-2.5M12 6v12M6 12h12",
   layers: "M12 3l9 5-9 5-9-5 9-5zM3 14l9 5 9-5",
   check: "M4 12.5l5 5L20 6",
@@ -258,7 +260,9 @@ const RIBBON = {
       buttons: [
         { icon: "zoomext", title: "全体表示", act: "fitToDrawing", big: true },
         { icon: "zoomin", title: "拡大", act: "zoomIn" },
-        { icon: "zoomout", title: "縮小", act: "zoomOut" }
+        { icon: "zoomout", title: "縮小", act: "zoomOut" },
+        { icon: "zoomwin", title: "窓ズーム", tool: "zoomwindow" },
+        { icon: "zoomprev", title: "前画面", act: "zoomPrevious" }
       ]
     },
     { label: "画面移動", buttons: [{ icon: "pan", title: "パン", tool: "pan", big: true }] }
@@ -298,6 +302,7 @@ const RIBBON_ACTIONS = {
   fitToDrawing: () => fitToDrawing(),
   zoomIn: () => zoomIn(),
   zoomOut: () => zoomOut(),
+  zoomPrevious: () => zoomPrevious(),
   openDock: (arg) => openDock(arg),
   changeReviewState: (arg) => changeReviewState(arg),
   goLayoutSpace: () => goLayoutSpace(),
@@ -339,6 +344,9 @@ const state = {
   // "fit": 全体表示直後(その範囲で再fit) / "restored": 記憶位置の復元直後(中心を保つ) /
   // "default"・"user": 起動時既定・利用者操作後(従来どおりカメラを動かさない)。
   cameraMode: "default",
+  // ZOOM P(前画面)で戻る表示の履歴。図面を切り替えると破棄する。
+  /** @type {{ x: number, y: number, scale: number }[]} */
+  viewHistory: [],
   /** @type {{ minX: number, minY: number, maxX: number, maxY: number }[]} */
   fitBounds: [],
   // 直近のfitが利用者の明示操作(全体表示・ZOOM E・Import等)か、起動時の自動fitか。
@@ -1095,6 +1103,7 @@ function bindEvents() {
   document.querySelector("#quickPrintBtn").addEventListener("click", goLayoutSpace);
   document.querySelector("#resetBtn").addEventListener("click", () => {
     clearDrawing();
+    drawingEpoch += 1;
     state.drawing = seedDrawing();
     resetAuthoringState();
     fitCameraToDrawing();
@@ -1437,6 +1446,7 @@ async function createNewDrawingFromForm(event) {
   const unit = String(data.get("unit") ?? "mm");
   const template = String(data.get("template") ?? "blank");
   const role = state.drawing.currentRole;
+  const epoch = drawingEpoch;
   try {
     if (state.apiStatus.connected) {
       const body = await apiRequest("/api/drawings", {
@@ -1444,8 +1454,12 @@ async function createNewDrawingFromForm(event) {
         headers: idempotencyHeaders(),
         body: JSON.stringify({ name, unit, template })
       });
+      // 作成要求中に別の図面へ切り替えていたら、作成結果で上書きしない(図面はサーバーに作成済み)。
+      if (isStaleDrawingResponse(epoch, "新規図面作成")) return;
+      drawingEpoch += 1;
       state.drawing = { ...body.drawing, currentRole: role };
     } else {
+      drawingEpoch += 1;
       state.drawing = template === "demo" ? seedDrawing() : createDrawing();
       state.drawing.id = `dwg_${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? Date.now()}`;
       state.drawing.name = name;
@@ -1457,6 +1471,7 @@ async function createNewDrawingFromForm(event) {
     /** @type {HTMLDialogElement} */ (document.querySelector("#newDrawingDialog")).close();
     persist(`新規図面作成: ${name}`);
   } catch (error) {
+    if (isStaleDrawingResponse(epoch, "新規図面作成")) return;
     log(`新規図面作成失敗: ${errorMessage(error)}`);
     render();
   }
@@ -1557,10 +1572,26 @@ async function executeUiCommand(command) {
     state.currentLayerId = command.layerId;
     log(`現在レイヤー: ${layerName(command.layerId)}`);
   }
-  if (command.action === "fit") fitCameraToDrawing();
+  if (command.action === "fit") {
+    const before = { ...state.camera };
+    fitCameraToDrawing();
+    recordViewChange(before);
+  }
+  if (command.action === "zoomWindow") zoomToWindow(command.corners[0], command.corners[1]);
+  if (command.action === "zoomPrevious") {
+    zoomPrevious();
+    return;
+  }
+  if (command.action === "zoomFactor") {
+    const before = { ...state.camera };
+    applyUserCamera(zoomCameraAtCenter(state.camera, command.factor, currentCanvasView()));
+    recordViewChange(before);
+  }
   if (command.action === "pan") {
+    const before = { ...state.camera };
     state.camera.x += command.offset.x * state.camera.scale;
     state.camera.y += command.offset.y * state.camera.scale;
+    recordViewChange(before);
     state.viewChanged = true;
     state.cameraMode = "user";
     log(`パン: ${command.offset.x},${command.offset.y}`);
@@ -1612,7 +1643,50 @@ function navigateCommandHistory(event) {
 }
 
 function fitToDrawing() {
+  const before = { ...state.camera };
   fitCameraToDrawing();
+  recordViewChange(before);
+  render();
+}
+
+// 利用者の表示操作で表示が実際に変わった場合だけ、操作前の表示をZOOM P用の履歴へ積む
+// (変化のない全体表示やZOOM 1Xで履歴を消費させない)。ホイールの連続操作のまとまりもここで区切る。
+function recordViewChange(before) {
+  endWheelGroup();
+  const changed = before.x !== state.camera.x || before.y !== state.camera.y || before.scale !== state.camera.scale;
+  if (changed) state.viewHistory = pushViewHistory(state.viewHistory, before);
+}
+
+function currentCanvasView() {
+  const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
+  return canvas ? canvasViewSize(canvas) : DEFAULT_CANVAS_SIZE;
+}
+
+// 表示操作(窓・倍率・前画面)で得たカメラを適用し、図面ごとの表示位置として記憶させる。
+function applyUserCamera(camera) {
+  state.camera = camera;
+  state.cameraMode = "user";
+  state.viewChanged = true;
+  log(`ズーム: ${zoomReadoutText()}`);
+}
+
+function zoomToWindow(a, b) {
+  const camera = cameraForWindow(a, b, currentCanvasView());
+  const before = { ...state.camera };
+  applyUserCamera(camera);
+  recordViewChange(before);
+}
+
+function zoomPrevious() {
+  const previous = state.viewHistory[state.viewHistory.length - 1];
+  if (!previous) {
+    log("ZOOM P: 戻れる前の表示がありません。");
+    render();
+    return;
+  }
+  state.viewHistory = state.viewHistory.slice(0, -1);
+  endWheelGroup();
+  applyUserCamera({ ...previous });
   render();
 }
 
@@ -1685,6 +1759,19 @@ function flushViewSave() {
   }
 }
 
+/** 図面の切替(デモ初期化・新規作成・APIからの別図面読込)ごとに進む世代。 */
+let drawingEpoch = 0;
+/** AI Previewの要求ごとに進む番号。最新の要求の完了だけがaiBusyを解除する。 */
+let aiPreviewRequestToken = 0;
+
+// API応答を待つ間に別の図面へ切り替わっていたら、古い図面向けの応答を今の図面へ適用しない。
+function isStaleDrawingResponse(epoch, label) {
+  if (epoch === drawingEpoch) return false;
+  log(`${label}: 応答待ちの間に図面が切り替わったため、結果を破棄しました`);
+  render();
+  return true;
+}
+
 function fitCameraToDrawing() {
   const canvas = /** @type {HTMLCanvasElement | null} */ (document.querySelector("#cadCanvas"));
   if (canvas) syncCanvasBackingSize(canvas, window.devicePixelRatio);
@@ -1696,6 +1783,10 @@ function fitCameraToDrawing() {
 function resetAuthoringState() {
   // 前の図面で入力した点を、新しい図面の先頭@の基準にしない。
   state.lastPoint = null;
+  state.viewHistory = [];
+  endWheelGroup();
+  // 前の図面向けのAI Preview待ちは破棄されるため、入力欄を使える状態へ戻す。
+  state.aiBusy = false;
   state.currentLayerId = state.drawing.layers.some((layer) => layer.id === "layer-structure")
     ? "layer-structure"
     : state.drawing.layers[0]?.id;
@@ -1945,11 +2036,13 @@ function zoomAtCenter(factor) {
   const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("#cadCanvas"));
   if (!canvas) return;
   const view = canvasViewSize(canvas);
+  const previousCamera = { ...state.camera };
   const before = screenToWorld(view.width / 2, view.height / 2);
   state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(view.width / 2, view.height / 2);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  recordViewChange(previousCamera);
   state.viewChanged = true;
   state.cameraMode = "user";
   log(`ズーム: ${zoomReadoutText()}`);
@@ -1979,16 +2072,19 @@ async function changeReviewState(action) {
     render();
     return;
   }
+  const epoch = drawingEpoch;
   try {
     const body = await apiRequest(`/api/drawings/${state.drawing.id}/review`, {
       method: "POST",
       headers: transactionHeaders(),
       body: JSON.stringify({ action })
     });
+    if (isStaleDrawingResponse(epoch, "レビュー操作")) return;
     state.drawing = body.drawing;
     state.saveStatus = "synced";
     persist({ submit: "レビュー提出", approve: "承認完了", new_version: "新版作成" }[action]);
   } catch (error) {
+    if (isStaleDrawingResponse(epoch, "レビュー操作")) return;
     state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
     log(`API操作失敗: ${errorMessage(error)}`);
     render();
@@ -2022,6 +2118,26 @@ function onPointerDown(event) {
     return;
   }
 
+  if (state.tool === "zoomwindow") {
+    // 窓ズームの角は主ボタン(左クリック)だけで受け付ける。
+    if (event.button !== 0) return;
+    // 窓ズームはスナップせず、クリックした位置そのものを範囲の角にする。
+    state.draftPoints.push(rawWorld);
+    if (state.draftPoints.length === 2) {
+      const [a, b] = state.draftPoints;
+      state.draftPoints = [];
+      state.tool = "select";
+      try {
+        zoomToWindow(a, b);
+      } catch (error) {
+        log(`窓ズーム失敗: ${errorMessage(error)}`);
+      }
+    } else {
+      log("窓ズーム: もう一方の角をクリックしてください");
+    }
+    render();
+    return;
+  }
   if (state.tool === "area") {
     state.draftPoints.push(world);
     if (state.draftPoints.length === 2) {
@@ -2170,7 +2286,8 @@ function onPointerMove(event) {
   const world = snapPoint(rawWorld);
   updateCoordReadout(world);
   if (state.draftPoints.length > 0) {
-    drawCanvas(world);
+    // 窓ズームはスナップしない点で範囲を確定するため、プレビューも同じ点で描く。
+    drawCanvas(state.tool === "zoomwindow" ? rawWorld : world);
   }
 }
 
@@ -2182,11 +2299,12 @@ function onPointerUp() {
   }
   if (state.panStart) {
     const moved = state.camera.x !== state.panStart.camera.x || state.camera.y !== state.panStart.camera.y;
-    state.panStart = null;
     if (moved) {
+      recordViewChange(state.panStart.camera);
       state.viewChanged = true;
       state.cameraMode = "user";
     }
+    state.panStart = null;
     log("パン表示を更新");
     render();
     return;
@@ -2228,14 +2346,32 @@ function cancelDrag() {
   render();
 }
 
+// 連続したホイール操作は1回の表示変更として履歴に積む(ZOOM Pで1ノッチずつ戻らない)。
+// まとまりの開始時の表示を控え、実際に表示が変わった時点で1回だけ積む。
+let lastWheelAt = 0;
+/** @type {{ x: number, y: number, scale: number } | null} */
+let wheelGroupStart = null;
+
+function endWheelGroup() {
+  lastWheelAt = 0;
+  wheelGroupStart = null;
+}
+
 function onWheel(event) {
   event.preventDefault();
+  const now = Date.now();
+  if (now - lastWheelAt > 800) wheelGroupStart = { ...state.camera };
+  lastWheelAt = now;
   const factor = event.deltaY < 0 ? 1.12 : 0.9;
   const before = screenToWorld(event.offsetX, event.offsetY);
   state.camera.scale = clampCameraScale(state.camera.scale * factor, state.camera.scale);
   const after = screenToWorld(event.offsetX, event.offsetY);
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
+  if (wheelGroupStart && (wheelGroupStart.x !== state.camera.x || wheelGroupStart.y !== state.camera.y || wheelGroupStart.scale !== state.camera.scale)) {
+    state.viewHistory = pushViewHistory(state.viewHistory, wheelGroupStart);
+    wheelGroupStart = null;
+  }
   state.viewChanged = true;
   state.cameraMode = "user";
   drawCanvas();
@@ -2362,8 +2498,10 @@ async function undoLastTransaction() {
   }
   const current = structuredClone(state.drawing);
   state.redoStack.push(current);
+  const epoch = drawingEpoch;
   const succeeded = await commitCommands("UNDO", snapshotCommands(state.drawing, target), { recordHistory: false });
-  if (!succeeded) {
+  // 図面が切り替わった後は新しい図面の履歴に触れない(前の図面の状態を復元しない)。
+  if (!succeeded && epoch === drawingEpoch) {
     state.redoStack.pop();
     state.undoStack.push(target);
   }
@@ -2378,8 +2516,9 @@ async function redoLastTransaction() {
   }
   const current = structuredClone(state.drawing);
   state.undoStack.push(current);
+  const epoch = drawingEpoch;
   const succeeded = await commitCommands("REDO", snapshotCommands(state.drawing, target), { recordHistory: false });
-  if (!succeeded) {
+  if (!succeeded && epoch === drawingEpoch) {
     state.undoStack.pop();
     state.redoStack.push(target);
   }
@@ -2438,20 +2577,29 @@ function snapshotCommands(current, target) {
 async function planAiProposal() {
   const promptInput = /** @type {HTMLTextAreaElement} */ (document.querySelector("#aiPrompt"));
   const promptValue = promptInput.value;
+  const requestToken = ++aiPreviewRequestToken;
   state.aiBusy = true;
   state.aiError = null;
   render();
   if (state.apiStatus.connected) {
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(`/api/drawings/${state.drawing.id}/agent-runs`, {
         method: "POST",
         body: JSON.stringify({ prompt: promptValue })
       });
+      if (epoch !== drawingEpoch) {
+        // 図面切替後に新しいPreviewを始めていれば、その処理中表示は解除しない。
+        if (requestToken === aiPreviewRequestToken) state.aiBusy = false;
+        isStaleDrawingResponse(epoch, "AI Preview");
+        return;
+      }
       state.previewProposal = body.run.proposal;
       state.previewRunId = body.run.id;
       state.aiEngine = body.run.proposal?.engine ?? "rule";
     } catch (error) {
-      state.aiBusy = false;
+      if (requestToken === aiPreviewRequestToken) state.aiBusy = false;
+      if (isStaleDrawingResponse(epoch, "AI Preview")) return;
       state.aiError = errorMessage(error);
       log(`AI Preview失敗: ${errorMessage(error)}`);
       render();
@@ -2476,18 +2624,21 @@ async function applyAiProposal() {
   }
 
   if (state.apiStatus.connected && state.previewRunId) {
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(`/api/agent-runs/${state.previewRunId}/approve`, {
         method: "POST",
         headers: transactionHeaders(),
         body: JSON.stringify({ drawingId: state.drawing.id, proposal: state.previewProposal })
       });
+      if (isStaleDrawingResponse(epoch, "AI適用")) return;
       state.drawing = body.drawing;
       state.saveStatus = "synced";
       state.previewProposal = null;
       state.previewRunId = null;
       persist("AI提案を承認適用 / サーバー同期");
     } catch (error) {
+      if (isStaleDrawingResponse(epoch, "AI適用")) return;
       state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
       log(`AI適用失敗: ${errorMessage(error)}`);
       render();
@@ -2513,18 +2664,21 @@ async function commitCommands(label, commands, options = {}) {
   const requestBody = options.body ?? { label, commands };
   if (state.apiStatus.connected) {
     state.saveStatus = "syncing";
+    const epoch = drawingEpoch;
     try {
       const body = await apiRequest(path, {
         method: "POST",
         headers: transactionHeaders(),
         body: JSON.stringify(requestBody)
       });
+      if (isStaleDrawingResponse(epoch, label)) return false;
       state.drawing = body.drawing;
       state.saveStatus = "synced";
       recordDrawingHistory(before, options);
       persist(`${label} / サーバー同期`);
       return true;
     } catch (error) {
+      if (isStaleDrawingResponse(epoch, label)) return false;
       state.saveStatus = error instanceof Error && "status" in error && error.status === 409 ? "conflict" : "unsynced";
       log(`${label}失敗: ${errorMessage(error)}`);
       render();
@@ -2666,7 +2820,12 @@ function drawCanvas(pointerWorld = null) {
     ctx.save();
     ctx.strokeStyle = "#ff8a00";
     ctx.setLineDash([8, 6]);
-    if (state.tool === "ellipse" && state.draftPoints.length === 2) {
+    if (state.tool === "zoomwindow") {
+      // 窓ズームの範囲を矩形で示す。
+      const a = worldToScreen(state.draftPoints[0]);
+      const b = worldToScreen(pointerWorld);
+      ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+    } else if (state.tool === "ellipse" && state.draftPoints.length === 2) {
       const [center, majorEnd] = state.draftPoints;
       const majorX = majorEnd.x - center.x;
       const majorY = majorEnd.y - center.y;
@@ -2968,10 +3127,14 @@ async function checkApiHealth() {
     const drawingChanged = drawingBody.drawing.id !== state.drawing.id;
     if (drawingChanged) {
       state.layoutDraft = null;
-      // 前の図面の作図途中の点・カーソル位置を、新しい図面の距離入力や@の基準にしない。
+      state.viewHistory = [];
+      endWheelGroup();
+      // 前の図面の作図途中の点(窓ズームの角を含む)・カーソル位置・LASTPOINTを、新しい図面へ持ち越さない。
       state.lastPoint = null;
       state.draftPoints = [];
       state.pointerWorld = null;
+      // 別の図面へ切り替わるため、前の図面向けに応答待ちの操作結果は適用させない。
+      drawingEpoch += 1;
     }
     state.drawing = { ...drawingBody.drawing, currentRole: selectedRole };
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。

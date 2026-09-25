@@ -255,8 +255,32 @@ function parseCommandTokens(input, context) {
   }
   if (["Z", "ZOOM"].includes(command)) {
     const option = (tokens[0] ?? "EXTENTS").toUpperCase();
-    if (!["E", "EXTENTS", "ALL", "A"].includes(option)) throw new Error("ZOOMはEXTENTSに対応しています。");
-    return { kind: "ui", action: "fit" };
+    // 誤入力で表示を変えないよう、E/Pに余分な引数があれば拒否する。
+    if (["E", "EXTENTS", "ALL", "A"].includes(option)) {
+      if (tokens.length > 1) throw new Error("形式: ZOOM E");
+      return { kind: "ui", action: "fit" };
+    }
+    if (["P", "PREVIOUS"].includes(option)) {
+      if (tokens.length > 1) throw new Error("形式: ZOOM P");
+      return { kind: "ui", action: "zoomPrevious" };
+    }
+    if (["W", "WINDOW"].includes(option)) {
+      // 2点を省略した場合はCanvas上の2回クリックで範囲を指定する。
+      if (tokens.length === 1) return { kind: "ui", action: "tool", tool: "zoomwindow" };
+      if (tokens.length !== 3) throw new Error("形式: ZOOM W [x1,y1 x2,y2]");
+      return { kind: "ui", action: "zoomWindow", corners: [point(tokens[1]), point(tokens[2])] };
+    }
+    // AutoCADと同様、ZOOMに続けて2点を与えた場合も窓ズームとして扱う。
+    if (tokens.length === 2 && isCoordinate(tokens[0]) && isCoordinate(tokens[1])) {
+      return { kind: "ui", action: "zoomWindow", corners: [point(tokens[0]), point(tokens[1])] };
+    }
+    const factorMatch = /^(\d+(?:\.\d+)?|\.\d+)X$/i.exec(tokens[0] ?? "");
+    if (factorMatch && tokens.length === 1) {
+      const factor = Number(factorMatch[1]);
+      if (!Number.isFinite(factor) || !(factor > 0)) throw new Error("ZOOMの倍率は0より大きい有限の値を 2X のように指定してください。");
+      return { kind: "ui", action: "zoomFactor", factor };
+    }
+    throw new Error("ZOOMは E(全体) / W(窓) / P(前画面) / 倍率(例: 2X, 0.5X) に対応しています。");
   }
   if (["P", "PAN"].includes(command)) {
     requireCount(tokens, 1, "PAN dx,dy");
@@ -309,7 +333,7 @@ function parseCommandTokens(input, context) {
   if (["HELP", "?"].includes(command)) {
     return {
       kind: "message",
-      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM PLOT UNDO REDO / 座標: x,y 距離<角度 @dx,dy @距離<角度(先頭の@は直前に入力した点が基準) / 作図中は数値だけで距離の直接入力 / F3 OSnap F7 グリッド F8 直交 F9 スナップ"
+      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM(E/W/P/nX) PLOT UNDO REDO / 座標: x,y 距離<角度 @dx,dy @距離<角度(先頭の@は直前に入力した点が基準) / 作図中は数値だけで距離の直接入力 / F3 OSnap F7 グリッド F8 直交 F9 スナップ"
     };
   }
   throw new Error(`未対応のコマンドです: ${command}`);
