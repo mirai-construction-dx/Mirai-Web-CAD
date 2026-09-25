@@ -65,8 +65,14 @@ const OSNAP_MODE_LABELS = Object.freeze({
   quadrant: "四分点",
   intersection: "交点",
   perpendicular: "垂線",
+  tangent: "接線",
   nearest: "近接点"
 });
+
+/** 作図補助のファンクションキー(AutoCAD互換)。 */
+const DRAFTING_FUNCTION_KEYS = Object.freeze({ F3: "osnapEnabled", F7: "showGrid", F8: "orthoEnabled", F9: "snapEnabled" });
+/** 作図中に数値だけを入力したとき、カーソル方向へその距離の点を置けるツール(距離の直接入力)。 */
+const DIRECT_DISTANCE_TOOLS = new Set(["line", "circle", "dimension", "polyline", "spline", "hatch"]);
 
 const RIBBON_TABS = [
   ["home", "ホーム"],
@@ -345,6 +351,12 @@ const state = {
   focusTarget: null,
   drag: null,
   panStart: null,
+  // 直前に入力した点(Canvasのクリックまたはコマンドの最終点)。コマンド先頭の@の基準(LASTPOINT)。
+  /** @type {{ x: number, y: number } | null} */
+  lastPoint: null,
+  // Canvas上の直近のカーソル位置(図面座標)。距離の直接入力の方向に使う。
+  /** @type {{ x: number, y: number } | null} */
+  pointerWorld: null,
   measurement: null,
   viewMode: VIEW_MODES.has(requestedViewMode) ? requestedViewMode : "normal",
   apiStatus: { state: "idle", message: "未確認", connected: false, roleLocked: false },
@@ -1489,23 +1501,47 @@ async function executeCommandLine(event) {
   state.focusTarget = "command";
   log(`> ${raw}`);
   try {
+    if (tryDirectDistanceEntry(raw)) {
+      render();
+      return;
+    }
     const parsed = parseCadCommand(raw, {
       drawing: state.drawing,
       currentLayerId: state.currentLayerId,
       selectedId: state.selectedId,
       selectedIds: state.selectedIds,
-      previousSelection: state.previousSelection
+      previousSelection: state.previousSelection,
+      lastPoint: state.lastPoint
     });
     if (parsed.kind === "transaction") {
-      await commitCommands(`CLI ${parsed.label}`, parsed.commands);
+      if ((await commitCommands(`CLI ${parsed.label}`, parsed.commands)) && parsed.lastPoint) state.lastPoint = parsed.lastPoint;
       return;
     }
+    if (parsed.lastPoint) state.lastPoint = parsed.lastPoint;
     if (parsed.kind === "message") log(parsed.message);
     if (parsed.kind === "ui" && !(await executeUiCommand(parsed))) return;
   } catch (error) {
     log(`Command Error: ${errorMessage(error)}`);
   }
   render();
+}
+
+// 距離の直接入力: 作図中(直前の点あり)に数値だけを入力すると、直前の点からカーソルの方向へ
+// その距離の点を置く。直交モード中は方向を水平/垂直へ拘束する。処理した場合true。
+function tryDirectDistanceEntry(raw) {
+  if (!/^(\d+(?:\.\d+)?|\.\d+)$/.test(raw)) return false;
+  const last = state.draftPoints.at(-1);
+  if (!last || !DIRECT_DISTANCE_TOOLS.has(state.tool)) return false;
+  const distance = Number(raw);
+  if (!(distance > 0)) throw new Error("距離は0より大きい値を入力してください。");
+  const cursor = state.pointerWorld;
+  const target = cursor && state.settings.orthoEnabled ? applyOrtho(last, cursor) : cursor;
+  const length = target ? Math.hypot(target.x - last.x, target.y - last.y) : 0;
+  if (!(length > 1e-9)) throw new Error("距離の直接入力: Canvas上でカーソルを置く方向へ動かしてから数値を入力してください。");
+  const point = { x: last.x + ((target.x - last.x) / length) * distance, y: last.y + ((target.y - last.y) / length) * distance };
+  placeDraftPoint(point);
+  log(`距離の直接入力: ${formatNumber(distance)} → ${formatNumber(point.x)}, ${formatNumber(point.y)}`);
+  return true;
 }
 
 async function executeUiCommand(command) {
@@ -2047,6 +2083,12 @@ function onPointerDown(event) {
     return;
   }
 
+  placeDraftPoint(world);
+}
+
+// 作図ツールへ1点を入力する(Canvasのクリックと、コマンド欄の距離の直接入力で共用)。
+function placeDraftPoint(world) {
+  state.lastPoint = world;
   if (state.tool === "line" || state.tool === "rect" || state.tool === "circle" || state.tool === "dimension") {
     state.draftPoints.push(world);
     if (state.draftPoints.length === 2) {
@@ -2094,6 +2136,7 @@ function onPointerMove(event) {
     return;
   }
   const rawWorld = screenToWorld(event.offsetX, event.offsetY);
+  state.pointerWorld = rawWorld;
   if (state.pathDrawing) {
     const last = state.draftPoints.at(-1);
     if (state.draftPoints.length < 2000 && Math.hypot(last.x - rawWorld.x, last.y - rawWorld.y) * state.camera.scale >= 3) state.draftPoints.push(rawWorld);
@@ -2875,7 +2918,7 @@ function snapPoint(point) {
   let snappedToEntity = false;
   if (state.settings.osnapEnabled) {
     const toleranceWorld = 10 / state.camera.scale;
-    const candidate = findOsnapPoint(activeDrawing(), point, toleranceWorld, state.settings.osnapModes);
+    const candidate = findOsnapPoint(activeDrawing(), point, toleranceWorld, state.settings.osnapModes, state.draftPoints.at(-1) ?? null);
     if (candidate) {
       next = candidate;
       snappedToEntity = true;
@@ -3250,5 +3293,13 @@ applyTheme(state.settings.theme);
 // 表示寸法の変化でbacking storeを追従させる(カメラは維持)。
 window.addEventListener("resize", () => drawCanvas());
 window.addEventListener("pagehide", flushViewSave);
+// F3/F7/F8/F9で作図補助を切り替える(ダイアログ表示中は対象外)。ブラウザ既定動作(F3の検索等)は抑止する。
+document.addEventListener("keydown", (event) => {
+  const key = DRAFTING_FUNCTION_KEYS[event.key];
+  if (!key || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (document.querySelector("dialog[open]")) return;
+  event.preventDefault();
+  toggleSetting(key);
+});
 render();
 checkApiHealth();

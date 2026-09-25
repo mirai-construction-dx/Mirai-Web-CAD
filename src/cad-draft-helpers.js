@@ -201,7 +201,7 @@ export function segmentIntersection(s1, s2) {
 /**
  * 有効なOSnapモード集合(UI・デフォルト値の正本)。
  */
-export const OSNAP_MODES = Object.freeze(["endpoint", "midpoint", "center", "quadrant", "intersection", "perpendicular", "nearest"]);
+export const OSNAP_MODES = Object.freeze(["endpoint", "midpoint", "center", "quadrant", "intersection", "perpendicular", "tangent", "nearest"]);
 
 /**
  * デフォルトの有効モード。近接点(nearest)は「線の近くをクリックすると常に
@@ -215,6 +215,7 @@ export const DEFAULT_OSNAP_MODES = Object.freeze({
   quadrant: true,
   intersection: true,
   perpendicular: false,
+  tangent: false,
   nearest: false
 });
 
@@ -226,8 +227,33 @@ const MODE_PRIORITY = Object.freeze({
   center: 3,
   quadrant: 4,
   perpendicular: 5,
-  nearest: 6
+  tangent: 6,
+  nearest: 7
 });
+
+/**
+ * 外部の点fromから円・円弧へ引いた接線の接点(最大2点)。fromが円の内側・円周上なら接点はない。
+ * 円弧は接点が弧の範囲にあるものだけを返す。
+ * @param {{ x: number, y: number }} from
+ * @param entity circle または arc
+ */
+export function tangentPoints(from, entity) {
+  if (entity.type !== "circle" && entity.type !== "arc") return [];
+  const { center, radius } = entity;
+  const dx = from.x - center.x;
+  const dy = from.y - center.y;
+  const distance = Math.hypot(dx, dy);
+  if (!(radius > 0) || distance <= radius + 1e-9) return [];
+  const base = Math.atan2(dy, dx);
+  const offset = Math.acos(radius / distance);
+  const points = [];
+  for (const angle of [base + offset, base - offset]) {
+    const degrees = ((angle * 180) / Math.PI + 360) % 360;
+    if (entity.type === "arc" && !angleOnArc(degrees, entity.startAngle, entity.endAngle)) continue;
+    points.push({ x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) });
+  }
+  return points;
+}
 
 /**
  * 1エンティティから有効モードの候補点を列挙する。
@@ -319,9 +345,10 @@ function candidatesForEntity(entity, modes) {
  * @param {{x:number,y:number}} worldPoint
  * @param {number} toleranceWorld world-unit search radius
  * @param {object} [modes] 有効モード(DEFAULT_OSNAP_MODES互換)。省略時は既定全モード
+ * @param {{x:number,y:number}|null} [fromPoint] 作図中の直前の点。接線(tangent)の計算に使う
  * @returns {{x:number,y:number}|null}
  */
-export function findOsnapPoint(drawing, worldPoint, toleranceWorld, modes = DEFAULT_OSNAP_MODES) {
+export function findOsnapPoint(drawing, worldPoint, toleranceWorld, modes = DEFAULT_OSNAP_MODES, fromPoint = null) {
   const visibleLayerIds = new Set(drawing.layers.filter((layer) => layer.visible).map((layer) => layer.id));
   const active = { ...DEFAULT_OSNAP_MODES, ...(modes ?? {}) };
   const nearEntities = [];
@@ -378,6 +405,13 @@ export function findOsnapPoint(drawing, worldPoint, toleranceWorld, modes = DEFA
       if (active.nearest) {
         consider({ ...closestPointOnSegment(worldPoint, segment.a, segment.b), mode: "nearest" });
       }
+    }
+  }
+
+  // 4) 接線: 直前の点から円・円弧へ引いた接線の接点(作図中の2点目以降のみ)
+  if (active.tangent && fromPoint) {
+    for (const entity of nearEntities) {
+      for (const tangent of tangentPoints(fromPoint, entity)) consider({ ...tangent, mode: "tangent" });
     }
   }
 

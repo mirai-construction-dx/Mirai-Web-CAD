@@ -146,7 +146,7 @@ test("segmentIntersection returns crossing points but not shared endpoints", () 
 
 test("OSNAP_MODES lists the supported snap modes and defaults keep endpoint/midpoint/center/quadrant/intersection", () => {
   assert.deepEqual(OSNAP_MODES, [
-    "endpoint", "midpoint", "center", "quadrant", "intersection", "perpendicular", "nearest"
+    "endpoint", "midpoint", "center", "quadrant", "intersection", "perpendicular", "tangent", "nearest"
   ]);
   assert.equal(DEFAULT_OSNAP_MODES.endpoint, true);
   assert.equal(DEFAULT_OSNAP_MODES.midpoint, true);
@@ -154,6 +154,7 @@ test("OSNAP_MODES lists the supported snap modes and defaults keep endpoint/midp
   assert.equal(DEFAULT_OSNAP_MODES.quadrant, true);
   assert.equal(DEFAULT_OSNAP_MODES.intersection, true);
   assert.equal(DEFAULT_OSNAP_MODES.perpendicular, false, "perpendicular defaults off to avoid misfires");
+  assert.equal(DEFAULT_OSNAP_MODES.tangent, false, "tangent defaults off (needs a from point)");
   assert.equal(DEFAULT_OSNAP_MODES.nearest, false, "nearest defaults off to avoid misfires");
 });
 
@@ -213,4 +214,30 @@ test("findOsnapPoint snaps nearest-on-segment when enabled and closer than endpo
   const modes = { ...DEFAULT_OSNAP_MODES, nearest: true };
   // 端点(1000,0)までの距離 √(494²+6²)≈494 に対し、線上の最近点(506,0)は約6 → nearestが勝つ
   assert.deepEqual(findOsnapPoint(drawing, { x: 506, y: 6 }, 20, modes), { x: 506, y: 0 });
+});
+
+test("tangent points from an external point touch circles and respect arc ranges", async () => {
+  const { tangentPoints, findOsnapPoint } = await import("../src/cad-draft-helpers.js");
+  const { circle, arc, createDrawing } = await import("../src/cad-core.js");
+  const ring = circle("layer-structure", [0, 0], 50);
+  const from = { x: 100, y: 0 };
+  const points = tangentPoints(from, ring);
+  assert.equal(points.length, 2);
+  for (const tangent of points) {
+    assert.ok(Math.abs(Math.hypot(tangent.x, tangent.y) - 50) < 1e-9, "on the circle");
+    // 接点では半径と接線が直交する。
+    assert.ok(Math.abs(tangent.x * (from.x - tangent.x) + tangent.y * (from.y - tangent.y)) < 1e-6, "perpendicular to radius");
+  }
+  assert.deepEqual(tangentPoints({ x: 10, y: 0 }, ring), [], "no tangent from inside the circle");
+  const upperArc = arc("layer-structure", [0, 0], 50, 0, 180);
+  const arcPoints = tangentPoints(from, upperArc);
+  assert.equal(arcPoints.length, 1);
+  assert.ok(arcPoints[0].y > 0);
+  const drawing = createDrawing({ entities: [ring] });
+  const upper = points.find((point) => point.y > 0);
+  const near = { x: upper.x + 2, y: upper.y + 1 };
+  assert.equal(findOsnapPoint(drawing, near, 5, { endpoint: false, midpoint: false, center: false, quadrant: false, intersection: false }, from), null, "tangent is off by default");
+  const snapped = findOsnapPoint(drawing, near, 5, { endpoint: false, midpoint: false, center: false, quadrant: false, intersection: false, tangent: true }, from);
+  assert.ok(Math.abs(snapped.x - upper.x) < 1e-9 && Math.abs(snapped.y - upper.y) < 1e-9);
+  assert.equal(findOsnapPoint(drawing, near, 5, { tangent: true, quadrant: false }, null), null, "tangent needs a from point");
 });

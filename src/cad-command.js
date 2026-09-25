@@ -41,7 +41,23 @@ const TOOL_COMMANDS = {
   TEXT: "text"
 };
 
+// 連続点入力の先頭の@が基準にする「直前に入力した点」(AutoCADのLASTPOINT)と、
+// 今回のコマンドで最後に解決した連続点。parseCadCommandは同期処理のため呼出し単位で閉じる。
+/** @type {{ x: number, y: number } | null} */
+let activeLastPoint = null;
+/** @type {{ x: number, y: number } | null} */
+let resolvedLastPoint = null;
+
 export function parseCadCommand(input, context) {
+  activeLastPoint = context?.lastPoint ?? null;
+  resolvedLastPoint = null;
+  const result = parseCommandTokens(input, context);
+  // 連続点を解決したコマンドは、次のコマンドの先頭@の基準になる最終点を返す。
+  if (resolvedLastPoint && result && typeof result === "object") return { ...result, lastPoint: resolvedLastPoint };
+  return result;
+}
+
+function parseCommandTokens(input, context) {
   const tokens = tokenize(input.trim());
   if (tokens.length === 0) return { kind: "noop" };
   const command = tokens.shift().toUpperCase();
@@ -293,7 +309,7 @@ export function parseCadCommand(input, context) {
   if (["HELP", "?"].includes(command)) {
     return {
       kind: "message",
-      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM PLOT UNDO REDO / 座標: x,y 距離<角度 @dx,dy @距離<角度(@は2点目以降)"
+      message: "LINE RECT CIRCLE ARC ELLIPSE SPLINE PLINE TEXT DIM DIMASSOC DIMSTYLE HATCH ERASE MOVE COPY ROTATE SCALE OFFSET TRIM EXTEND MIRROR ARRAY BREAK JOIN CHAMFER FILLET BOUNDARY PEDIT STRETCH EXPLODE MATCHPROP LENGTHEN REVERSE PURGE OVERKILL SELECT FENCE LASSO QSELECT SELECTSIMILAR SELECTION DIST AREA ID BLOCK LAYER PAN ZOOM PLOT UNDO REDO / 座標: x,y 距離<角度 @dx,dy @距離<角度(先頭の@は直前に入力した点が基準) / 作図中は数値だけで距離の直接入力 / F3 OSnap F7 グリッド F8 直交 F9 スナップ"
     };
   }
   throw new Error(`未対応のコマンドです: ${command}`);
@@ -554,7 +570,7 @@ function point(value) {
 }
 
 // 連続点入力。@dx,dy / @distance<angle は同じコマンド内の直前点を基準に解決する。
-// 単一行CLIには前回コマンドの最終点(AutoCADのLASTPOINT)がないため、先頭点の@は拒否する。
+// 先頭点の@は、直前のコマンドまたはCanvasで最後に入力した点(LASTPOINT)を基準にする。
 function pointSequence(tokens) {
   const points = [];
   for (const token of tokens) {
@@ -563,10 +579,11 @@ function pointSequence(tokens) {
       points.push(point(text));
       continue;
     }
-    const previous = points.at(-1);
-    if (!previous) throw new Error(`先頭の点に相対座標(@)は使用できません: ${text}`);
+    const previous = points.at(-1) ?? activeLastPoint;
+    if (!previous) throw new Error(`先頭の点の相対座標(@)の基準になる直前の点(LASTPOINT)がありません: ${text}`);
     points.push(resolvePoint(text.slice(1), previous, true));
   }
+  if (points.length > 0) resolvedLastPoint = points.at(-1);
   return points;
 }
 

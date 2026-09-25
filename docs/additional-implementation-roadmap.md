@@ -125,14 +125,14 @@ STRETCHは2点の矩形と移動量、MATCHPROPはコピー元IDを指定する�
 
 | ID | 実装対象 | 状態 |
 | --- | --- | --- |
-| SNAP-01 | 接線・見かけ交点 | 後続 |
+| SNAP-01 | 接線・見かけ交点 | 一部実装: 作図中の直前点から円・円弧への接線OSnap(既定OFF、設定で有効化)。見かけ交点は後続 |
 | SNAP-02 | 延長・平行・Node | 後続 |
 | SNAP-03 | From/一時追跡点 | 後続 |
 | SNAP-04 | 極・Object Snapトラッキング | 後続 |
 | SNAP-05 | Dynamic Input/カーソル表示 | 後続 |
-| SNAP-06 | 距離・角度直接入力 | 後続 |
-| SNAP-07 | 相対座標・極座標 | 一部実装: CLI連続点の`@dx,dy`/`@距離<角度`、全座標引数の`距離<角度`。LASTPOINT・Canvas入力は後続 |
-| SNAP-08 | Snap Override/OSnap一時無効/Ortho一時切替 | 後続 |
+| SNAP-06 | 距離・角度直接入力 | 一部実装: 作図中に数値だけを入力するとカーソル方向へその距離の点(LINE/CIRCLE/DIM/PLINE/SPLINE/HATCH、直交モード時は水平/垂直)。角度の直接入力は後続 |
+| SNAP-07 | 相対座標・極座標 | 一部実装: CLI連続点の`@dx,dy`/`@距離<角度`、全座標引数の`距離<角度`、先頭の`@`は直前に入力した点(LASTPOINT、コマンドの最終点またはCanvasのクリック)が基準。単一点の位置指定(CIRCLE中心等)と移動量の`@`は後続 |
+| SNAP-08 | Snap Override/OSnap一時無効/Ortho一時切替 | 一部実装: F3(OSnap)/F7(グリッド)/F8(直交)/F9(スナップ)の切替(ダイアログ表示中は無効)。Shiftによる一時切替・単発Snap Overrideは後続 |
 
 ### DIM: 寸法
 
