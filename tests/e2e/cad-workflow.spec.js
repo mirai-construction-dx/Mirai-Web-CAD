@@ -187,10 +187,12 @@ test("新規図面、コマンドライン、JSON Importを連続操作できる
   await expect(quantity).toHaveText("3");
   await expect(page.getByLabel("コマンドログ")).toContainText("CLI PLINE");
 
+  // 先頭の@は直前のコマンドの最終点(PLINEの最後の点1000,500)を基準にする(LASTPOINT)。
   await command.fill("LINE @100,0 200,0");
   await command.press("Enter");
-  await expect(page.getByLabel("コマンドログ")).toContainText("先頭の点に相対座標(@)は使用できません");
-  await expect(quantity).toHaveText("3");
+  await expect(quantity).toHaveText("4");
+  const created = await page.evaluate(() => JSON.parse(localStorage.getItem("mirai-web-cad-mvp")).entities.at(-1).points);
+  expect(created).toEqual([{ x: 1100, y: 500 }, { x: 200, y: 0 }]);
 });
 
 test("CriticalまたはSeriousのアクセシビリティ違反がない", async ({ page }) => {

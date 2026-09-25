@@ -212,6 +212,20 @@ test("command line accepts polar coordinates as point arguments and rejects ambi
   assert.deepEqual(moved.commands[0].id, selectedId);
 });
 
+test("a leading @ resolves against the last entered point (LASTPOINT) and commands return their last point", () => {
+  const withLast = (value, lastPoint) => parseCadCommand(value, context({ lastPoint }));
+  const chained = withLast("LINE @0,100 @100,0", { x: 100, y: 0 });
+  assert.deepEqual(chained.commands[0].entity.points, [{ x: 100, y: 100 }, { x: 200, y: 100 }]);
+  assert.deepEqual(chained.lastPoint, { x: 200, y: 100 });
+  assert.deepEqual(withLast("PLINE @50<90 @50<0", { x: 0, y: 0 }).commands[0].entity.points.at(-1), { x: 50, y: 50 });
+  assert.deepEqual(parseCadCommand("LINE 0,0 30,40", context()).lastPoint, { x: 30, y: 40 });
+  assert.throws(() => parseCadCommand("LINE @10,0 20,0", context()), /直前の点\(LASTPOINT\)がありません/);
+  // 単一点の位置指定と移動量では従来どおり@を受け付けない。
+  assert.throws(() => withLast("CIRCLE @10,0 5", { x: 0, y: 0 }), /相対座標/);
+  // UIコマンドや連続点を使わないコマンドの結果にはlastPointを付けない。
+  assert.deepEqual(parseCadCommand("UNDO", context()), { kind: "ui", action: "undo" });
+});
+
 test("ZOOM supports extents, window, previous and scale factor", () => {
   const ui = (value) => parseCadCommand(value, context());
   assert.deepEqual(ui("ZOOM"), { kind: "ui", action: "fit" });
