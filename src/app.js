@@ -325,6 +325,8 @@ const state = {
   fitPending: false,
   // 起動直後やAPIからの図面差替え後の描画で、表示に収まらない図面だけをZOOM EXTENTSする。
   outOfViewFitPending: true,
+  // 同じ図面をAPIから再同期した後、新しい図形が現在の表示から外れていないかを確かめる(記憶位置は使わない)。
+  boundsRecheckPending: false,
   // 利用者の操作(ズーム・パン・全体表示)で表示が変わり、図面ごとの表示位置として保存すべき状態。
   viewChanged: false,
   // Canvas寸法が変わったときの追従方法を決める直近のカメラの由来。
@@ -2526,6 +2528,21 @@ function drawCanvas(pointerWorld = null) {
     }
   }
   lastCanvasView = view;
+  if (state.boundsRecheckPending && !state.fitPending && !state.outOfViewFitPending) {
+    // 同じ図面の再同期: 全体表示中なら新しい図形範囲へ合わせ直し、それ以外は図形が表示から完全に外れたときだけfitする。
+    // 一部を拡大して見ている利用者の表示は維持する。
+    const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
+    if (state.cameraMode === "fit") {
+      state.fitBounds = bounds;
+      state.camera = fitCameraToBounds(bounds, view);
+    } else if (bounds.length > 0 && !boundsIntersectView(bounds, state.camera, view)) {
+      state.camera = fitCameraToBounds(bounds, view);
+      state.cameraMode = "fit";
+      state.fitBounds = bounds;
+      state.fitExplicit = false;
+    }
+  }
+  state.boundsRecheckPending = false;
   if (state.fitPending || state.outOfViewFitPending) {
     const bounds = state.drawing.entities.map(entityBounds).filter(Boolean);
     const saved = state.fitPending ? null : loadSavedViews()[state.drawing.id];
@@ -2907,6 +2924,7 @@ async function checkApiHealth() {
     // 別図面へ替わった場合、または起動後まだ表示を操作していない場合だけ、記憶位置の復元・fit判定を行う。
     // 同じ図面の再同期で、利用者が今見ている表示を古い記憶位置へ戻さない。
     if (drawingChanged || state.cameraMode === "default") state.outOfViewFitPending = true;
+    else state.boundsRecheckPending = true;
     state.saveStatus = saveDrawing(state.drawing).ok ? "synced" : "failed";
     state.apiStatus = {
       state: "ok",
