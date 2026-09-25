@@ -29,7 +29,8 @@
 | ActionのSHA固定、Secret Scan | 充足 | `.github/workflows/ci.yml` |
 | SBOM | 一部 | CycloneDX SBOMはCIで生成。署名・Attestationは無い |
 | マージ前の人間レビュー(通常2名/重要3名) | **不整合** | Rulesetの必須承認数は0。配布中の[GITHUB_POLICY.md](../../GITHUB_POLICY.md)(中央ポリシー)は必須チェック通過後の自動マージを標準とする。現行運用は利用者のY/N判断でマージしているが、GitHub上の承認記録ではない |
-| CODEOWNERSはTeam指定 | 一部 | `.github/CODEOWNERS`は個人のみ。組織に存在するTeam(`core-maintainers`/`platform-reviewers`/`security-reviewers`)は本リポジトリへのアクセス権がなく、`application-reviewers`・`data-spatial-reviewers`は未作成。アクセスのないTeamはCODEOWNERSで無効 |
+| CODEOWNERSはTeam指定 | 一部 | `.github/CODEOWNERS`は個人のみ。組織に存在するTeamのうち`core-maintainers`/`platform-reviewers`/`security-reviewers`は本リポジトリへのアクセス権がない(アクセスのないTeamはCODEOWNERSで無効)。`ai-authors`は書込み権限を持つがCODEOWNERSには未記載(AI作成者のTeamでありレビュー担当ではない)。`application-reviewers`・`data-spatial-reviewers`は未作成 |
+| AIの結果の反映に人間承認(承認者の分離・承認記録) | **未充足** | 反映には利用者の明示操作が必要だが、編集権限があれば誰でも適用でき、オフライン時は承認記録を残さない([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)) |
 | AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **不整合** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(提案) |
 | Coreの版付き成果物を版・digest固定で取り込む(`core-lock/`等) | 未対応(現時点で利用対象なし) | Web-CADはCoreの契約(event/evidence/MCP)をまだ使っていない。取込み時の手順は§3 |
 | 基盤の台帳(Core `registries/systems.yaml`等)への登録 | 未対応 | Coreにweb-cadの登録なし。system_idの決定が必要 |
