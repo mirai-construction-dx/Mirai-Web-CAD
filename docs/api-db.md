@@ -10,7 +10,7 @@
 | `GET` | `/api/drawings/:drawingId` | 実装済み。図面取得 |
 | `POST` | `/api/drawings/:drawingId/transactions` | 実装済み。CAD Coreコマンド一括適用 |
 | `POST` | `/api/drawings/:drawingId/agent-runs` | 実装済み。AI提案作成。ルールベースが`needs_input`かつプロンプトありかつサーバー側でLLM(OpenAI/Anthropic)が設定済みの場合のみフォールバック(fail-soft、LLM障害時もルールベース結果を返す)。actor単位でLLM呼び出しのみレート制限(既定10回/分) |
-| `POST` | `/api/agent-runs/:runId/approve` | 実装済み。AI提案を人の承認で適用 |
+| `POST` | `/api/agent-runs/:runId/approve` | 実装済み。AI提案を人の承認で適用。適用は1回だけで、適用済み(`status`が`planned`以外)の提案は409(同時の承認もDBの条件で1件に絞る。独立レビューM-2) |
 | `POST` | `/api/drawings/:drawingId/review` | 実装済み。レビュー提出、承認、新版 |
 | `POST` | `/api/drawings/:drawingId/comments` | 実装済み。`canComment`権限(reviewerも可)。コメント追加、監査ログに本文は記録しない |
 | `GET` | `/api/audit-logs` | 実装済み。承認系権限のみ。`limit`/`offset`ページング付きの一覧(読取り専用。状態を変更しない) |

@@ -561,6 +561,57 @@ test("agent run preview then explicit approval mutates drawing", async () => {
   assert.equal(approveBody.drawing.entities.length, before.drawing.entities.length + 2);
 });
 
+test("an applied agent run cannot be approved again", async () => {
+  resetMemoryStore();
+  const plan = await (await handleApiRequest(
+    new Request("https://example.test/api/drawings/dwg_demo_001/agent-runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-demo-role": "drafter" },
+      body: JSON.stringify({ prompt: "クレーンの重機範囲を追加" })
+    }),
+    env
+  )).json();
+  const approve = (idempotencyKey, version) =>
+    handleApiRequest(
+      new Request(`https://example.test/api/agent-runs/${plan.run.id}/approve`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-demo-role": "drafter",
+          "idempotency-key": idempotencyKey,
+          "expected-version": String(version)
+        },
+        body: "{}"
+      }),
+      env
+    );
+  const first = await approve("idem-agent-once-1", 1);
+  assert.equal(first.status, 200);
+  const applied = (await first.json()).drawing;
+
+  // 別のIdempotency-Keyと最新のrevisionで再送しても、同じ提案は二度適用されない。
+  const second = await approve("idem-agent-once-2", applied.revision);
+  assert.equal(second.status, 409);
+  const after = await (await handleApiRequest(new Request("https://example.test/api/drawings/dwg_demo_001"), env)).json();
+  assert.equal(after.drawing.revision, applied.revision);
+  assert.equal(after.drawing.entities.length, applied.entities.length);
+});
+
+test("the memory store refuses to save an agent run that is no longer planned", async () => {
+  resetMemoryStore();
+  const { createDataStore } = await import("../src/data-store.js");
+  const store = createDataStore({});
+  const drawing = await store.getDrawing("dwg_demo_001");
+  const run = { id: "run_once", drawingId: drawing.id, status: "completed", prompt: "p", proposal: { status: "planned", commands: [] }, createdBy: "t", createdAt: new Date().toISOString() };
+  await store.saveAgentRun(run);
+  const audit = { id: "audit_once", actorId: "t", role: "drafter", action: "agent.approved", targetType: "drawing", targetId: drawing.id, detail: {}, createdAt: new Date().toISOString() };
+  await assert.rejects(
+    () => store.saveDrawingAtomically({ ...drawing, revision: drawing.revision + 1 }, audit, "idem-store-once", "t", "/x", run),
+    (error) => error.status === 409
+  );
+  assert.equal((await store.getDrawing(drawing.id)).revision, drawing.revision);
+});
+
 test("agent-runs prefers the rule-based engine and never calls the LLM stub when a rule matches", async () => {
   resetMemoryStore();
   let called = false;

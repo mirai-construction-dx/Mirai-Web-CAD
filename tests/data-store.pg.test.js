@@ -154,6 +154,53 @@ test("PostgreSQL統合テスト", { skip: skipReason }, async (t) => {
     );
   });
 
+  await t.test("適用済みのAI提案は、別のIdempotency-Keyと最新revisionでも再適用できない(M-2)", async () => {
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const drawing = createDrawing();
+    drawing.id = `dwg_it_agent_${suffix}`;
+    drawing.currentRole = "drafter";
+    const audit = (id, action) => ({
+      id: `audit_it_agent_${id}_${suffix}`,
+      actorId: "it@test",
+      role: "drafter",
+      action,
+      targetType: "drawing",
+      targetId: drawing.id,
+      detail: {},
+      createdAt: new Date().toISOString()
+    });
+    await store.createDrawingAtomically(drawing, audit("c", "drawing.created"), `idem_it_agent_c_${suffix}`, "it@test", "/api/drawings");
+    const run = {
+      id: `run_it_${suffix}`,
+      drawingId: drawing.id,
+      status: "planned",
+      prompt: "統合テスト",
+      proposal: { status: "planned", commands: [] },
+      createdBy: "it@test",
+      createdAt: new Date().toISOString()
+    };
+    await store.saveAgentRun(run);
+
+    const current = await store.getDrawing(drawing.id, false);
+    const first = { ...current, revision: current.revision + 1 };
+    assert.equal(
+      await store.saveDrawingAtomically(first, audit("a1", "agent.approved"), `idem_it_agent_a1_${suffix}`, "it@test", "/api/agent-runs/x/approve", { ...run, status: "completed" }),
+      true
+    );
+    assert.equal((await store.getAgentRun(run.id)).status, "completed");
+
+    const second = { ...first, revision: first.revision + 1 };
+    await assert.rejects(
+      () => store.saveDrawingAtomically(second, audit("a2", "agent.approved"), `idem_it_agent_a2_${suffix}`, "it@test", "/api/agent-runs/x/approve", { ...run, status: "completed" }),
+      (error) => {
+        assert.equal(error.status, 409);
+        assert.match(error.message, /適用済み/);
+        return true;
+      }
+    );
+    assert.equal((await store.getDrawing(drawing.id, false)).revision, first.revision);
+  });
+
   await t.test("appendAudit・listAuditLogs・countAuditLogsが一貫して動作する", async () => {
     const before = await store.countAuditLogs();
     await store.appendAudit({

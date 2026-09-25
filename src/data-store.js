@@ -154,6 +154,9 @@ class MemoryDataStore {
     if (agentRun && !memory.agentRuns.has(agentRun.id)) {
       throw Object.assign(new Error(`Agent Runが見つかりません: ${agentRun.id}`), { status: 404 });
     }
+    if (agentRun && memory.agentRuns.get(agentRun.id).status !== "planned") {
+      throw agentRunConflictError(agentRun.id);
+    }
     memory.drawings.set(drawing.id, clone(drawing));
     memory.auditLogs.push(clone(auditEntry));
     memory.idempotencyKeys.add(idempotencyKey);
@@ -466,6 +469,10 @@ class PostgresDataStore {
             state = ${drawing.state},
             updated_at = now()
           where id = ${drawing.id} and revision = ${expectedRevision}
+            -- AI提案の承認は、提案が未適用(planned)の場合だけ図面を更新する(独立レビュー M-2)。
+            and (${agentRun === null} or exists (
+              select 1 from agent_runs where id = ${agentRun?.id ?? null} and status = 'planned'
+            ))
           returning id
         ), version_write as (
           insert into drawing_versions (id, drawing_id, version_no, state, content, content_hash, created_by)
@@ -503,6 +510,7 @@ class PostgresDataStore {
             status = ${agentRun?.status ?? null},
             proposal = coalesce(${agentProposal}, proposal)
           where id = ${agentRun?.id ?? null}
+            and status = 'planned'
             and exists (select 1 from drawing_write)
           returning id
         ), idempotency_write as (
@@ -513,7 +521,13 @@ class PostgresDataStore {
         )
         select key from idempotency_write
       `;
-      if (rows.length === 0) throw conflictError(null, expectedRevision);
+      if (rows.length === 0) {
+        if (agentRun) {
+          const runs = await this.sql`select status from agent_runs where id = ${agentRun.id} limit 1`;
+          if (runs.length > 0 && runs[0].status !== "planned") throw agentRunConflictError(agentRun.id);
+        }
+        throw conflictError(null, expectedRevision);
+      }
       return true;
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "23505") return false;
@@ -682,4 +696,8 @@ function clone(value) {
 function conflictError(actual, expected) {
   const detail = actual == null ? `expected=${expected}` : `expected=${expected}, actual=${actual}`;
   return Object.assign(new Error(`リビジョンが競合しています。${detail}`), { status: 409 });
+}
+
+function agentRunConflictError(runId) {
+  return Object.assign(new Error(`AI提案は適用済みです: ${runId}`), { status: 409 });
 }
