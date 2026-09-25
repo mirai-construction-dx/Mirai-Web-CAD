@@ -697,15 +697,19 @@ async function getPublicDrawing(store, id) {
 
 // 匿名で読める公開図面から、利用者を特定できる値(Cloudflare Accessのメールアドレス等)を除く
 // (独立レビュー M-1)。操作者を表す項目は変更履歴のコマンド内の図形まで含めてどの階層でも、
-// 役割名・system・agent 以外なら "user" に置き換える。
+// 役割名・system・agent 以外なら "user" に置き換える。コメント本文や図形の文字列に書かれた
+// メールアドレスも伏せる。
 const PUBLIC_ACTOR_LABELS = new Set(["system", "agent", "user", ...Object.keys(ROLE_POLICIES)]);
 const IDENTITY_KEYS = new Set(["actor", "author", "createdBy"]);
+const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+const REDACTED_EMAIL = "[メールアドレス省略]";
 
 function publicActor(value) {
   return typeof value === "string" && PUBLIC_ACTOR_LABELS.has(value) ? value : "user";
 }
 
 export function redactPublicDrawing(value) {
+  if (typeof value === "string") return value.replace(EMAIL_PATTERN, REDACTED_EMAIL);
   if (Array.isArray(value)) return value.map(redactPublicDrawing);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(

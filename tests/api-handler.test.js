@@ -858,7 +858,7 @@ test("anonymous public demo drawing does not expose who edited or commented on i
     commands: [{ op: "add", entity: { id: "e_pii_line", type: "line", layerId: "layer-frame", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], createdBy: email } }]
   });
   assert.equal(edited.status, 200, JSON.stringify(await edited.clone().json()));
-  const commented = await post("comments", "pii-comment", 2, { body: "確認お願いします" });
+  const commented = await post("comments", "pii-comment", 2, { body: `確認お願いします(連絡先 ${email})` });
   assert.equal(commented.status, 201);
 
   // 認証済みの利用者には、誰が操作したかが見える。
@@ -876,7 +876,7 @@ test("anonymous public demo drawing does not expose who edited or commented on i
   const { drawing } = await response.json();
   assert.equal(JSON.stringify(drawing).includes("company.example"), false);
   assert.equal(drawing.comments.at(-1).author, "user");
-  assert.equal(drawing.comments.at(-1).body, "確認お願いします");
+  assert.equal(drawing.comments.at(-1).body, "確認お願いします(連絡先 [メールアドレス省略])");
   assert.equal(drawing.auditLog.at(-1).actor, "user");
   assert.equal(drawing.auditLog[0].actor, "system");
   assert.equal(drawing.entities.find((entity) => entity.id === "e_pii_line").createdBy, "user");

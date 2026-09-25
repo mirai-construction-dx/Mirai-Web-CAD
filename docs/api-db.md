@@ -5,7 +5,7 @@
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 実装済み。匿名可。DB名などの内部情報は認証時のみ返す |
-| `GET` | `/api/drawings/demo` | 実装済み。`visibility=public`のデモ図面だけ匿名取得可。匿名応答では操作者・コメント投稿者・図形作成者(`actor`・`author`・`createdBy`)を役割名・`system`・`agent`以外は`user`に置き換え、メールアドレス等を返さない(独立レビューM-1)。認証済みの取得では置き換えない |
+| `GET` | `/api/drawings/demo` | 実装済み。`visibility=public`のデモ図面だけ匿名取得可。匿名応答では操作者・コメント投稿者・図形作成者(`actor`・`author`・`createdBy`)を役割名・`system`・`agent`以外は`user`に置き換え、コメント本文・図形の文字列に含まれるメールアドレス形式の文字列も`[メールアドレス省略]`に置き換える(独立レビューM-1)。氏名・電話番号など、メールアドレス以外の自由記述は対象外。認証済みの取得では置き換えない |
 | `POST` | `/api/drawings` | 実装済み。空/デモテンプレート、図面名、mm/mを指定して重複実行なしで作成 |
 | `GET` | `/api/drawings/:drawingId` | 実装済み。図面取得 |
 | `POST` | `/api/drawings/:drawingId/transactions` | 実装済み。CAD Coreコマンド一括適用 |
