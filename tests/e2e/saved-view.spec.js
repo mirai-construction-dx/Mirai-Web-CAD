@@ -52,7 +52,7 @@ test("a saved view that no longer shows the drawing falls back to ZOOM EXTENTS",
   expect(Math.abs(y - 4500)).toBeLessThan(1500);
 });
 
-test("resizing the canvas keeps the drawing point at the view center", async ({ page }, testInfo) => {
+test("resizing the canvas after ZOOM EXTENTS keeps the drawing fitted around the same center", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "desktop viewport resize");
   await command(page, "ZOOM E");
   const centerOf = async () => {

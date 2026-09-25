@@ -327,6 +327,12 @@ const state = {
   outOfViewFitPending: true,
   // 利用者の操作(ズーム・パン・全体表示)で表示が変わり、図面ごとの表示位置として保存すべき状態。
   viewChanged: false,
+  // Canvas寸法が変わったときの追従方法を決める直近のカメラの由来。
+  // "fit": 全体表示直後(その範囲で再fit) / "restored": 記憶位置の復元直後(中心を保つ) /
+  // "default"・"user": 起動時既定・利用者操作後(従来どおりカメラを動かさない)。
+  cameraMode: "default",
+  /** @type {{ minX: number, minY: number, maxX: number, maxY: number }[]} */
+  fitBounds: [],
   commandLog: ["起動: Mirai Web CAD"],
   commandHistory: [],
   commandHistoryIndex: 0,
@@ -1514,6 +1520,7 @@ async function executeUiCommand(command) {
     state.camera.x += command.offset.x * state.camera.scale;
     state.camera.y += command.offset.y * state.camera.scale;
     state.viewChanged = true;
+    state.cameraMode = "user";
     log(`パン: ${command.offset.x},${command.offset.y}`);
   }
   if (command.action === "plot") {
@@ -1897,6 +1904,7 @@ function zoomAtCenter(factor) {
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
   state.viewChanged = true;
+  state.cameraMode = "user";
   log(`ズーム: ${zoomReadoutText()}`);
   render();
 }
@@ -1952,6 +1960,7 @@ function onPointerDown(event) {
 
   if (state.tool === "pan" || event.button === 1) {
     state.panStart = { x: event.clientX, y: event.clientY, camera: { ...state.camera } };
+    state.cameraMode = "user";
     event.currentTarget.setPointerCapture(event.pointerId);
     return;
   }
@@ -2121,6 +2130,7 @@ function onPointerUp() {
   if (state.panStart) {
     state.panStart = null;
     state.viewChanged = true;
+    state.cameraMode = "user";
     log("パン表示を更新");
     render();
     return;
@@ -2171,6 +2181,7 @@ function onWheel(event) {
   state.camera.x += (after.x - before.x) * state.camera.scale;
   state.camera.y += (after.y - before.y) * state.camera.scale;
   state.viewChanged = true;
+  state.cameraMode = "user";
   drawCanvas();
 }
 
@@ -2497,7 +2508,9 @@ function drawCanvas(pointerWorld = null) {
   syncCanvasBackingSize(canvas, window.devicePixelRatio);
   const view = canvasViewSize(canvas);
   if (lastCanvasView && (lastCanvasView.width !== view.width || lastCanvasView.height !== view.height)) {
-    state.camera = keepCenterOnResize(state.camera, lastCanvasView, view);
+    // フォント読込やドック幅でCanvas寸法が描画後に変わった場合、全体表示・復元の意図を保つ。
+    if (state.cameraMode === "fit") state.camera = fitCameraToBounds(state.fitBounds, view);
+    else if (state.cameraMode === "restored") state.camera = keepCenterOnResize(state.camera, lastCanvasView, view);
   }
   lastCanvasView = view;
   if (state.fitPending || state.outOfViewFitPending) {
@@ -2506,12 +2519,17 @@ function drawCanvas(pointerWorld = null) {
     const restored = saved ? savedViewToCamera(saved, view) : null;
     if (state.fitPending) {
       state.camera = fitCameraToBounds(bounds, view);
+      state.cameraMode = "fit";
+      state.fitBounds = bounds;
       state.viewChanged = true;
     } else if (restored && (bounds.length === 0 || boundsIntersectView(bounds, restored, view))) {
       // 前回この図面を見ていた位置へ戻す。保存位置が図面から外れている(内容が変わった)場合は使わない。
       state.camera = restored;
+      state.cameraMode = "restored";
     } else if (!boundsVisibleInView(bounds, state.camera, view)) {
       state.camera = fitCameraToBounds(bounds, view);
+      state.cameraMode = "fit";
+      state.fitBounds = bounds;
     }
     state.fitPending = false;
     state.outOfViewFitPending = false;
