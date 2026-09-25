@@ -17,6 +17,10 @@ set -euo pipefail
 : "${OFFSITE_REMOTE:?OFFSITE_REMOTE is required (e.g. r2:mirai-web-cad-backups)}"
 : "${AGE_RECIPIENTS_FILE:?AGE_RECIPIENTS_FILE is required}"
 max_age_hours="${MAX_BACKUP_AGE_HOURS:-36}"
+# 使うrclone。Ubuntu配布のv1.60はR2が未対応のチェックサムヘッダーを送り、PUTごとに501を受ける
+# (データは書き込まれ、再試行で「既存」として成功扱いになっていた)ため、公式版を別の場所に置いて使う。
+# 同じホストの他システム(/usr/bin/rclone を使う)へは影響させない。
+rclone_bin="${RCLONE_BIN:-rclone}"
 
 if [[ ! -s "$AGE_RECIPIENTS_FILE" ]]; then
   echo "暗号化の受信者(公開鍵)ファイルがありません: $AGE_RECIPIENTS_FILE" >&2
@@ -61,7 +65,7 @@ for source in $OFFSITE_SOURCES; do
   encrypted="$work/$name.tar.age"
   tar -C "$(dirname "$dump")" -cf - "$name" "$name.manifest" | age -R "$AGE_RECIPIENTS_FILE" -o "$encrypted"
   target="$OFFSITE_REMOTE/$prefix/$name.tar.age"
-  if ! rclone copyto --ignore-existing "$encrypted" "$target"; then
+  if ! "$rclone_bin" copyto --ignore-existing "$encrypted" "$target"; then
     echo "[$prefix] 転送に失敗しました: $target" >&2
     status=1
     continue
@@ -69,7 +73,7 @@ for source in $OFFSITE_SOURCES; do
   # ageの出力長は平文の長さと受信者数だけで決まるため、既に転送済みの場合もサイズで照合できる。
   local_size="$(stat -c %s "$encrypted")"
   # rcloneは整形したJSON("Size": 123)を出力するため、JSONとして読む。
-  remote_size="$(rclone lsjson --stat "$target" 2>/dev/null | jq -r '.Size // empty' 2>/dev/null || true)"
+  remote_size="$("$rclone_bin" lsjson --stat "$target" 2>/dev/null | jq -r '.Size // empty' 2>/dev/null || true)"
   if [[ "$remote_size" != "$local_size" ]]; then
     echo "[$prefix] 転送後のサイズが一致しません(手元 ${local_size} / リモート ${remote_size:-なし}): $target" >&2
     status=1

@@ -255,7 +255,16 @@ journalctl -u mirai-web-cad-backup.service -n 20
 
 初回セットアップ(本番のsecret追加とsystemd設定の変更を含むため、オーナーのY/N後に行う):
 
-0. 転送処理は `age`・`rclone`・`jq` を使う(このホストには導入済み)。
+0. 転送処理は `age`・`jq` と、公式版の `rclone` を使う。Ubuntu配布の`rclone` v1.60はR2が未対応のチェックサムヘッダー(`X-Amz-Checksum-Crc64nvme`)を送り、アップロードごとに`501 Not Implemented`を受ける(2026-09-25実測)。同じホストの他システムが`/usr/bin/rclone`を使っているため置き換えず、公式版を`/opt/mirai-web-cad/bin/rclone`に置く(ユニットは`RCLONE_BIN`でこれを使う)。
+   ```bash
+   V=v1.75.1   # 更新時は https://downloads.rclone.org/version.txt を確認
+   curl -fsSO https://downloads.rclone.org/$V/rclone-$V-linux-amd64.zip
+   curl -fsSO https://downloads.rclone.org/$V/SHA256SUMS
+   grep " rclone-$V-linux-amd64.zip$" SHA256SUMS | sha256sum -c -     # OK であること
+   unzip -q rclone-$V-linux-amd64.zip
+   sudo install -d -m 755 /opt/mirai-web-cad/bin
+   sudo install -m 755 rclone-$V-linux-amd64/rclone /opt/mirai-web-cad/bin/rclone
+   ```
 1. R2 bucketとライフサイクルルールを作る: `wrangler r2 bucket create mirai-web-cad-backups`、`wrangler r2 bucket lifecycle add mirai-web-cad-backups expire-90d --expire-days 90`
 2. Cloudflareダッシュボードで、このbucketだけを対象にしたR2 API token(Object Read & Write)を作る。
 3. `~/.config/mirai-web-cad/offsite.env`(mode 0600)へ次の変数を書く。値はGit・ログ・チャットへ出さない。
