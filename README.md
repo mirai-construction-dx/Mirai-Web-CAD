@@ -182,3 +182,5 @@ RESTORE_DATABASE_URL="postgresql://...empty-db" BACKUP_FILE="artifacts/cad.dump"
 - [本番運用適合性評価書](docs/production-readiness-assessment.md)
 - [改善台帳](docs/improvement-register.md)
 - [独立リポジトリ移行Manifest](docs/migration-manifest.md)
+- [基盤連携の要件と現状(全体構成・リポジトリ構成 V3.6)](docs/architecture/platform-integration.md)
+- [作業規約(AGENTS.md)](AGENTS.md)
