@@ -28,8 +28,8 @@
 | main直接push禁止・必須CI | 充足 | Branch Protection(必須チェック5件+strict)とRuleset(必須チェック10件) |
 | ActionのSHA固定、Secret Scan | 充足 | `.github/workflows/ci.yml` |
 | SBOM | 一部 | CycloneDX SBOMはCIで生成。署名・Attestationは無い |
-| マージ前の人間レビュー(通常2名/重要3名) | 一部(1名承認、リスク受入れ済み) | 2026-09-25にA型へ切替え(Bot名義のPRにオーナーがApprove。承認1件+CODEOWNER、最後のpush後の承認、スレッド解決を必須)。2人目は2026-10以降に決定、見直し期限2026-10-31([外部入力・確定待ち台帳](../external-input-status.md)§4) |
-| CODEOWNERSはTeam指定 | 一部(個人指定) | CODEOWNERの承認を必須化。当面は個人`@Kensan196948G`、2人目の決定時にTeamへ移す |
+| マージ前の人間レビュー(通常2名/重要3名) | 未充足(リスク受入れ済み) | 2026-09-30に中央ポリシー v2 の自動マージへ統一(A型を廃止。Required Checksの全成功とconflictなしのみを条件とし、人間のApproveを待たない。[GITHUB_POLICY.md](../../GITHUB_POLICY.md) §2)。2人目は2026-10以降に決定、見直し期限2026-10-31([外部入力・確定待ち台帳](../external-input-status.md)§4) |
+| CODEOWNERSはTeam指定 | 一部(個人指定) | CODEOWNERはレビュー依頼先(承認は必須でない、2026-09-30)。当面は個人`@Kensan196948G`、2人目の決定時にTeamへ移す |
 | AIの結果の反映に人間承認(承認者の分離・承認記録) | **未充足** | 反映には利用者の明示操作が必要だが、編集権限があれば誰でも適用でき、オフライン時は承認記録を残さない([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)) |
 | AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **承認済み例外(期限付き)** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(承認済み、見直し期限2026-12-25) |
 | Coreの版付き成果物を版・digest固定で取り込む(`core-lock/`等) | 未対応(現時点で利用対象なし) | Web-CADはCoreの契約(event/evidence/MCP)をまだ使っていない。取込み時の手順は§3 |

@@ -37,9 +37,9 @@ npm run test:e2e      # Playwright desktop/mobile(ポートが空いている前
 
 ## 4. 変更の規約
 
-- Branch → PR → CI → レビュー → squash merge。mainへの直接pushは禁止。
+- Branch → PR → CI → (自動)レビュー → squash merge。mainへの直接pushは禁止。
 - AIエージェントはBot(`mirai-dx-bot`、Team `ai-authors`)の名義でcommit・push・PR作成する。Botは承認しない(組織の開発ガバナンス Portfolio `docs/operations/PORT-GOV-001`)。
-- 本リポジトリの承認方式は**A型(承認必須)**(2026-09-25にB型から切替え): Bot名義で作成したPRに、CODEOWNER(オーナー)がGitHub上でApproveした後にマージする。承認後にcommitを追加すると承認し直しが必要。AI・Botは承認しない。オーナーのアカウントで代理承認もしない。高リスク変更(認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)は、Approveに加えてオーナーのY/Nを得る。
+- マージ規定(2026-09-30、A型を廃止): PR は `gh pr merge --auto --squash` で自動マージを予約する。マージの条件は Required Checks の全成功と merge conflict がないことだけとし、人間の Y/N・選択・Approve を待たない。`--admin` による迂回は禁止する。Release・本番デプロイ・秘密情報の変更・不可逆な削除は、コードのマージとは別に Human Gate とする。（正本: 中央ポリシー `GITHUB_POLICY.md` v2） 高リスク変更(認証・secret・DNS・課金・公開範囲・破壊的migration・保護設定)の実行は、マージとは別にオーナーのY/Nを得る([GITHUB_POLICY.md](GITHUB_POLICY.md) §4)。AI・BotはGitHubのApproveをしない。オーナーのアカウントで代理承認もしない。
 - オーナー不在時に本番障害を止める手順は[オーナー不在時のロールバック](docs/runbooks/owner-absence-rollback.md)(mainは変更しない)。
 - PR本文は目的・変更・影響・テスト・セキュリティ・Migration・Deployment・Rollback・残課題・production-safe判定を記載する。
 - 秘密値・資格情報・接続文字列・個人情報をGit、ログ、PR、テスト結果へ出さない。
