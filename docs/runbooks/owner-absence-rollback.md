@@ -1,6 +1,6 @@
 # オーナー不在時のロールバックRunbook
 
-Web-CADは承認必須(A型)で、mainへの変更にはオーナーのGitHub Approveが必要です。オーナーが不在でも本番の障害を止められるよう、**本番ホストの作業ツリーを直前の正常なcommitへ戻す**手順をここに定めます。mainは変更しないため承認は不要です。mainのrevertはオーナーの復帰後にPRで行います。
+mainへの変更はPRの自動マージ(Required Checksの全成功が条件、[GITHUB_POLICY.md](../../GITHUB_POLICY.md) §2)で行いますが、本番への反映はオーナーの判断を要します。オーナーが不在でも本番の障害を止められるよう、**本番ホストの作業ツリーを直前の正常なcommitへ戻す**手順をここに定めます。mainは変更しません。mainのrevertはPRで行います。
 
 対象: 本番`mirai-web-cad.service`(18812)、MVP`mirai-web-cad-mvp.service`(18813)。実行者: 本番ホストにログインできる運用担当またはAIエージェント。
 
@@ -46,5 +46,5 @@ for port in 18812 18813; do curl -s --max-time 5 http://127.0.0.1:$port/api/heal
 ## 4. 記録と復帰後の対応
 
 1. GitHub Issueに、発生時刻、症状、戻す前後のcommit、確認結果を記録する。
-2. オーナーの復帰後、原因のPRをrevertするPR(Bot名義)を作成し、オーナーのApproveを得てmainへマージする。
+2. 原因のPRをrevertするPR(Bot名義)を作成し、`gh pr merge --auto --squash`で自動マージを予約する(Required Checksの全成功で mainへ入る)。
 3. 修正版をデプロイし、`npm run deploy:drift`が「一致」に戻ることを確認する。

@@ -310,7 +310,7 @@ journalctl -u mirai-web-cad-cloudflared.service -f
 
 ### ロールバック
 
-オーナー不在時(承認必須のためmainを戻せない場合)は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md)に従う。
+オーナー不在時(本番への反映の判断ができない場合)は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md)に従う。
 
 `dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、**稼働中のツリーで`npm ci`・`npm run build`を実行せず**、向き先を直前のリリースへ戻す(`.releases/`に無い場合だけ別ディレクトリでbuildしてから切り替える)。
 
