@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
@@ -272,31 +274,39 @@ jobs:
 
   preview:
     name: Deploy Preview
+    # merge_group(Merge Queue)では配信せず、必須チェック名「Deploy Preview」を成功で報告する。
+    # merge_group分岐を先に評価し、github.event.pull_request.* へ触れないようにする。
     if: >-
-      github.event_name == 'pull_request' &&
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      vars.CLOUDFLARE_DEPLOY_ENABLED == 'true'
+      vars.CLOUDFLARE_DEPLOY_ENABLED == 'true')
     needs: [application, migration, recovery, secret-scan, dependency-audit, terraform]
     runs-on: ubuntu-latest
     environment:
       name: preview
-      url: https://pr-${{ github.event.number }}.mirai-web-cad.pages.dev
+      url: ${{ github.event_name == 'pull_request' && format('https://pr-{0}.mirai-web-cad.pages.dev', github.event.number) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: github.event_name == 'pull_request'
         with:
           node-version: "22"
           cache: npm
-      - run: npm ci
-      - run: npm run build
+      - if: github.event_name == 'pull_request'
+        run: npm ci
+      - if: github.event_name == 'pull_request'
+        run: npm run build
       # Dependabot起点のPRにはリポジトリのシークレットが渡らない(GitHubの仕様)。その場合
       # wranglerは「CLOUDFLARE_API_TOKENが必要」で失敗し、**必須ではないジョブが常に赤**に
       # なって真の異常を覆い隠す(改善台帳P0-21と同種の問題)。資格情報が無い実行では
       # 配信と検証をスキップし、noticeで理由を残す。
       - name: Check Cloudflare credentials
         id: cloudflare
+        if: github.event_name == 'pull_request'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -307,7 +317,7 @@ jobs:
             echo "::notice title=Preview skipped::Cloudflareの資格情報がこの実行へ渡されていないため、プレビュー配信と検証をスキップします(Dependabot起点のPRではシークレットが渡らない仕様)。本ジョブは必須チェックではありません。"
           fi
       - name: Deploy preview
-        if: steps.cloudflare.outputs.available == 'true'
+        if: github.event_name == 'pull_request' && steps.cloudflare.outputs.available == 'true'
         run: >-
           npx wrangler pages deploy dist
           --project-name mirai-web-cad
@@ -317,9 +327,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Verify preview
-        if: steps.cloudflare.outputs.available == 'true'
+        if: github.event_name == 'pull_request' && steps.cloudflare.outputs.available == 'true'
         env:
           PREVIEW_URL: https://pr-${{ github.event.number }}.mirai-web-cad.pages.dev
         run: >-
           test "$(curl --retry 8 --retry-all-errors --silent --output /dev/null
           --write-out '%{http_code}' "$PREVIEW_URL/")" = "200"
+      - name: Report merge queue result
+        if: github.event_name == 'merge_group'
+        run: echo "::notice title=Preview not applicable::merge_group(Merge Queue)ではプレビュー配信を行いません。ビルド検証は「Lint, Test, Build, E2E, A11y」が担います。"
