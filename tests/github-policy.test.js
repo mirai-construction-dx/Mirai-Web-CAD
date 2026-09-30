@@ -19,8 +19,9 @@ test("GITHUB_POLICY.md lists only required checks that exist as CI job names", (
   for (const check of listed) assert.ok(jobNames.has(check), `required check "${check}" is not a CI job name`);
 });
 
-test("GITHUB_POLICY.md is the Web-CAD policy and does not mandate auto-merge over owner approval", () => {
+test("GITHUB_POLICY.md is the Web-CAD policy and follows the central auto-merge rule without --admin", () => {
   assert.match(policy, /^# Mirai-Web-CAD GitHub運用ポリシー/);
-  assert.match(policy, /A型/);
+  assert.match(policy, /gh pr merge --auto --squash/);
+  assert.match(policy, /`--admin` による迂回は禁止する/);
   assert.doesNotMatch(policy, /^# DeepSeek-Harness-StartUpTools/m);
 });
