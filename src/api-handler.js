@@ -932,7 +932,9 @@ function corsHeaders(env, requestId, requestOrigin) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,idempotency-key,expected-version,x-demo-role,x-demo-actor,x-request-id",
+    // 本番はAUTH_MODE=accessでdemoヘッダを使わないため、CORSの許可ヘッダから除外する
+    // (独立レビュー 2026-10-02)。ローカルdev(demo)は同一オリジン配信でCORS不要。
+    "access-control-allow-headers": "content-type,idempotency-key,expected-version,x-request-id",
     vary: "Origin",
     "x-request-id": requestId
   };

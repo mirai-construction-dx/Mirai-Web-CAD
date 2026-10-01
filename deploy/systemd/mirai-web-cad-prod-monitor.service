@@ -1,0 +1,26 @@
+[Unit]
+Description=Mirai Web CAD production local API, database and Access boundary monitor
+After=network-online.target postgresql.service mirai-web-cad.service
+Wants=network-online.target
+Requires=postgresql.service
+
+# 失敗時はGitHub Issueで通知する(独立レビュー 2026-10-02、H-2)。
+OnFailure=mirai-web-cad-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=kensan
+Group=kensan
+WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
+EnvironmentFile=/home/kensan/.config/mirai-web-cad/production.env
+Environment=LOCAL_URL=http://127.0.0.1:18812
+Environment=PUBLIC_URL=https://mirai-web-cad.mirai-dx-platform.com
+Environment=EXPECTED_DATABASE=mirai_web_cad
+Environment=PG_BIN=/usr/lib/postgresql/16/bin
+ExecStart=/usr/bin/bash scripts/check-production-health.sh
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
