@@ -125,6 +125,54 @@ class MemoryDataStore {
     memory.projectMembers.get(projectId)?.delete(member.toLowerCase());
   }
 
+  // 案件系の「業務書込＋監査」を単一メソッドへまとめ、監査の記録失敗時に業務書込を残さない
+  // (独立レビュー 2026-10-02、M-2)。メモリ実装は同期のため、監査IDの重複を業務書込の前に検査する。
+  async createProjectAtomically(project, auditEntry) {
+    if (memory.projects.has(project.id)) return null;
+    if (memory.auditLogs.some((item) => item.id === auditEntry.id)) {
+      throw new Error(`監査ログを記録できませんでした(重複ID): ${auditEntry.id}`);
+    }
+    const stored = clone({
+      id: project.id,
+      name: project.name,
+      owner: project.owner,
+      status: "active",
+      accessScope: project.accessScope
+    });
+    memory.projects.set(project.id, stored);
+    memory.projectMembers.set(project.id, new Set());
+    memory.auditLogs.push(clone(auditEntry));
+    return clone(stored);
+  }
+
+  async updateProjectAccessScopeAtomically(id, accessScope, auditEntry) {
+    const project = memory.projects.get(id);
+    if (!project) return null;
+    if (memory.auditLogs.some((item) => item.id === auditEntry.id)) {
+      throw new Error(`監査ログを記録できませんでした(重複ID): ${auditEntry.id}`);
+    }
+    project.accessScope = accessScope;
+    memory.auditLogs.push(clone(auditEntry));
+    return clone(project);
+  }
+
+  async addProjectMemberAtomically(projectId, member, addedBy, auditEntry) {
+    if (memory.auditLogs.some((item) => item.id === auditEntry.id)) {
+      throw new Error(`監査ログを記録できませんでした(重複ID): ${auditEntry.id}`);
+    }
+    if (!memory.projectMembers.has(projectId)) memory.projectMembers.set(projectId, new Set());
+    memory.projectMembers.get(projectId).add(member.toLowerCase());
+    memory.auditLogs.push(clone(auditEntry));
+  }
+
+  async removeProjectMemberAtomically(projectId, member, auditEntry) {
+    if (memory.auditLogs.some((item) => item.id === auditEntry.id)) {
+      throw new Error(`監査ログを記録できませんでした(重複ID): ${auditEntry.id}`);
+    }
+    memory.projectMembers.get(projectId)?.delete(member.toLowerCase());
+    memory.auditLogs.push(clone(auditEntry));
+  }
+
   async saveDrawing(drawing) {
     const current = memory.drawings.get(drawing.id);
     if (current && drawing.revision !== current.revision + 1) {
@@ -362,6 +410,58 @@ class PostgresDataStore {
     await this.sql`
       delete from project_members where project_id = ${projectId} and member = ${member.toLowerCase()}
     `;
+  }
+
+  // 案件系の「業務書込＋監査」を単一トランザクションへまとめ、監査の記録失敗時に業務書込を
+  // ロールバックする(独立レビュー 2026-10-02、M-2)。以前は別々の文で実行していたため、
+  // 業務書込のコミット後にappendAuditが失敗すると「監査行の無い案件/メンバー変更」が残った。
+  async createProjectAtomically(project, auditEntry) {
+    return this.sql.begin(async (tx) => {
+      const rows = await tx`
+        insert into projects (id, name, owner, status, access_scope)
+        values (${project.id}, ${project.name}, ${project.owner}, 'active', ${project.accessScope})
+        on conflict (id) do nothing
+        returning id, name, owner, status, access_scope
+      `;
+      if (rows.length === 0) return null;
+      await insertAudit(tx, auditEntry);
+      const row = rows[0];
+      return { id: row.id, name: row.name, owner: row.owner, status: row.status, accessScope: row.access_scope };
+    });
+  }
+
+  async updateProjectAccessScopeAtomically(id, accessScope, auditEntry) {
+    return this.sql.begin(async (tx) => {
+      const rows = await tx`
+        update projects set access_scope = ${accessScope}, updated_at = now()
+        where id = ${id}
+        returning id, name, owner, status, access_scope
+      `;
+      if (rows.length === 0) return null;
+      await insertAudit(tx, auditEntry);
+      const row = rows[0];
+      return { id: row.id, name: row.name, owner: row.owner, status: row.status, accessScope: row.access_scope };
+    });
+  }
+
+  async addProjectMemberAtomically(projectId, member, addedBy, auditEntry) {
+    await this.sql.begin(async (tx) => {
+      await tx`
+        insert into project_members (project_id, member, added_by)
+        values (${projectId}, ${member.toLowerCase()}, ${addedBy})
+        on conflict (project_id, member) do nothing
+      `;
+      await insertAudit(tx, auditEntry);
+    });
+  }
+
+  async removeProjectMemberAtomically(projectId, member, auditEntry) {
+    await this.sql.begin(async (tx) => {
+      await tx`
+        delete from project_members where project_id = ${projectId} and member = ${member.toLowerCase()}
+      `;
+      await insertAudit(tx, auditEntry);
+    });
   }
 
   // 注意: 現行のアプリケーション経路は saveDrawingAtomically を使用しており、この
@@ -694,6 +794,22 @@ function parseStoredJson(value) {
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
+}
+
+// 監査行をトランザクション内へ挿入する。appendAuditと同じ「必ず1行記録」を要求し、
+// 0行(重複ID)は異常として例外を投げ、呼び出し元のトランザクションをロールバックさせる。
+async function insertAudit(tx, entry) {
+  const rows = await tx`
+    insert into audit_logs (id, actor_id, action, target_type, target_id, detail, created_at)
+    values (${entry.id}, ${entry.actorId}, ${entry.action}, ${entry.targetType},
+            ${entry.targetId}, ${tx.json({ role: entry.role, ...entry.detail })},
+            ${entry.createdAt})
+    on conflict (id) do nothing
+    returning id
+  `;
+  if (rows.length !== 1) {
+    throw new Error(`監査ログを記録できませんでした(重複IDまたは未挿入): ${entry.id}`);
+  }
 }
 
 function conflictError(actual, expected) {

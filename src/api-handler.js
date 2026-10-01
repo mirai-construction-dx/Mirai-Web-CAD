@@ -404,9 +404,12 @@ export async function handleApiRequest(request, env = {}) {
       try {
         const id = typeof body.id === "string" && /^prj_[a-z0-9_-]{1,60}$/i.test(body.id) ? body.id : `prj_${cryptoSafeId()}`;
         const accessScope = body.accessScope === "restricted" ? "restricted" : "open";
-        const project = await store.createProject({ id, name: body.name.trim().slice(0, 100), owner: actor.actor.id, accessScope });
+        const name = body.name.trim().slice(0, 100);
+        const project = await store.createProjectAtomically(
+          { id, name, owner: actor.actor.id, accessScope },
+          createAuditEntry(actor.actor, "project.created", "project", id, { name, accessScope })
+        );
         if (!project) throw httpError(`案件IDは既に使用されています: ${id}`, 409);
-        await audit(store, actor.actor, "project.created", "project", project.id, { name: project.name, accessScope });
         return json({ ok: true, project }, 201, cors);
       } catch (error) {
         await releaseIdempotencyQuietly(store, idempotencyKey);
@@ -434,9 +437,12 @@ export async function handleApiRequest(request, env = {}) {
         throw httpError("同じIdempotency-Keyのリクエストは処理済みです。", 409);
       }
       try {
-        const project = await store.updateProjectAccessScope(projectMatch[1], body.accessScope);
+        const project = await store.updateProjectAccessScopeAtomically(
+          projectMatch[1],
+          body.accessScope,
+          createAuditEntry(actor.actor, "project.updated", "project", projectMatch[1], { accessScope: body.accessScope })
+        );
         if (!project) throw httpError(`案件が見つかりません: ${projectMatch[1]}`, 404);
-        await audit(store, actor.actor, "project.updated", "project", project.id, { accessScope: project.accessScope });
         return json({ ok: true, project }, 200, cors);
       } catch (error) {
         await releaseIdempotencyQuietly(store, idempotencyKey);
@@ -459,8 +465,12 @@ export async function handleApiRequest(request, env = {}) {
       try {
         const project = await store.getProject(projectMembersMatch[1]);
         if (!project) throw httpError(`案件が見つかりません: ${projectMembersMatch[1]}`, 404);
-        await store.addProjectMember(projectMembersMatch[1], body.member, actor.actor.id);
-        await audit(store, actor.actor, "project.member.added", "project", projectMembersMatch[1], { member: body.member.toLowerCase() });
+        await store.addProjectMemberAtomically(
+          projectMembersMatch[1],
+          body.member,
+          actor.actor.id,
+          createAuditEntry(actor.actor, "project.member.added", "project", projectMembersMatch[1], { member: body.member.toLowerCase() })
+        );
         const members = await store.listProjectMembers(projectMembersMatch[1]);
         return json({ ok: true, members }, 201, cors);
       } catch (error) {
@@ -480,8 +490,11 @@ export async function handleApiRequest(request, env = {}) {
       } catch {
         throw httpError("メンバー指定が不正です。", 400);
       }
-      await store.removeProjectMember(projectMemberMatch[1], member);
-      await audit(store, actor.actor, "project.member.removed", "project", projectMemberMatch[1], { member: member.toLowerCase() });
+      await store.removeProjectMemberAtomically(
+        projectMemberMatch[1],
+        member,
+        createAuditEntry(actor.actor, "project.member.removed", "project", projectMemberMatch[1], { member: member.toLowerCase() })
+      );
       const members = await store.listProjectMembers(projectMemberMatch[1]);
       return json({ ok: true, members }, 200, cors);
     }
