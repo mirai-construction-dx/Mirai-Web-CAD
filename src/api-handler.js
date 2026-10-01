@@ -68,6 +68,9 @@ const ALLOWED_TRANSACTION_OPS = new Set([
 // 1コマンドあたりの点列長の上限。全体はMAX_JSON_BYTESでも抑えているが、
 // 巨大な点列による計算量増大を入力境界で止める。
 const MAX_COMMAND_POINTS = 10_000;
+// トランザクションlabelの長さ上限。name=120/comment=1000に切っているのに対しlabelだけ無制限だった
+// (独立レビュー 2026-10-02)。command_events.label(text)と監査detailへの肥大化を防ぐ。
+const MAX_LABEL_CHARS = 200;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 // 追跡する利用者数(バケット×利用者)の上限。超えた場合は期限切れ→最も古い順に破棄する。
 const RATE_LIMIT_MAX_ENTRIES = 10_000;
@@ -176,10 +179,13 @@ export async function handleApiRequest(request, env = {}) {
       const idempotencyKey = requireIdempotency(request);
       await rejectClaimedIdempotency(store, idempotencyKey);
       requireExpectedVersion(request, drawing);
+      const label = typeof body.label === "string" && body.label.trim()
+        ? body.label.trim().slice(0, MAX_LABEL_CHARS)
+        : "API transaction";
       const result = applyTransaction(drawing, {
         source: "user",
         actor: actor.actor.id,
-        label: body.label ?? "API transaction",
+        label,
         commands
       });
       if (!result.ok) return json({ ok: false, error: result.error }, 409, cors);
@@ -190,7 +196,7 @@ export async function handleApiRequest(request, env = {}) {
       if (introduced.length > 0) {
         return json({ ok: false, error: `図形が不正なため保存できません: ${introduced[0].message}`, issues: introduced }, 400, cors);
       }
-      await saveMutationAtomically(store, result.drawing, actor.actor, "drawing.transaction", drawing.id, { label: body.label }, idempotencyKey, route);
+      await saveMutationAtomically(store, result.drawing, actor.actor, "drawing.transaction", drawing.id, { label }, idempotencyKey, route);
       return json({ ok: true, drawing: result.drawing, warnings: result.warnings }, 200, cors);
     }
 
@@ -468,7 +474,12 @@ export async function handleApiRequest(request, env = {}) {
       requireCadAdmin(actor.actor);
       const project = await store.getProject(projectMemberMatch[1]);
       if (!project) throw httpError(`案件が見つかりません: ${projectMemberMatch[1]}`, 404);
-      const member = decodeURIComponent(projectMemberMatch[2]);
+      let member;
+      try {
+        member = decodeURIComponent(projectMemberMatch[2]);
+      } catch {
+        throw httpError("メンバー指定が不正です。", 400);
+      }
       await store.removeProjectMember(projectMemberMatch[1], member);
       await audit(store, actor.actor, "project.member.removed", "project", projectMemberMatch[1], { member: member.toLowerCase() });
       const members = await store.listProjectMembers(projectMemberMatch[1]);
@@ -787,6 +798,17 @@ function requireTransactionCommands(body) {
     for (const [label, value] of [["points", command.points], ["entity.points", command.entity?.points], ["patch.points", command.patch?.points]]) {
       if (Array.isArray(value) && value.length > MAX_COMMAND_POINTS) {
         throw httpError(`commands[${index}].${label}が上限(${MAX_COMMAND_POINTS})を超えています。`, 413);
+      }
+    }
+    // op:"add"はcommand.entityが必須。欠落/nullだとcad-core.jsのcommand.entity.layerId参照が
+    // TypeError→500になるため、入力境界で400に倒す(独立レビュー 2026-10-02)。点列長の検査を
+    // 先に行い、既存の413判定を保つ。
+    if (command.op === "add") {
+      if (!command.entity || typeof command.entity !== "object" || Array.isArray(command.entity)) {
+        throw httpError(`commands[${index}].entityが必要です(op:add)。`, 400);
+      }
+      if (typeof command.entity.layerId !== "string" || !command.entity.layerId) {
+        throw httpError(`commands[${index}].entity.layerIdが必要です(op:add)。`, 400);
       }
     }
   });

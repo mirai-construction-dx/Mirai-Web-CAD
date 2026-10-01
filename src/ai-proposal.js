@@ -173,12 +173,12 @@ export const COMMAND_SCHEMA = {
 
 export function buildSystemPrompt(drawing) {
   const layerSummary = drawing.layers
-    .map((layer) => `${layer.id}(${layer.name}${layer.locked ? ",locked" : ""})`)
+    .map((layer) => `${escapeContext(layer.id)}(${escapeContext(layer.name)}${layer.locked ? ",locked" : ""})`)
     .join(", ");
   const entitySummary = drawing.entities
     .filter((entity) => entity.type !== "text")
     .slice(0, 50)
-    .map((entity) => `${entity.id}:${entity.type}@${entity.layerId}`)
+    .map((entity) => `${escapeContext(entity.id)}:${escapeContext(entity.type)}@${escapeContext(entity.layerId)}`)
     .join("; ");
   return [
     "あなたは土木施工図CADの操作提案アシスタントです。",
@@ -388,12 +388,19 @@ function buildAddLayerCommand(command, warnings) {
     warnings.push("レイヤー情報が不正なため追加を除外しました。");
     return null;
   }
+  const id = layer.id.trim().slice(0, 40);
+  // LLM由来のレイヤーIDは文字種を絞り、applyTransactionに加えてnormalize段階でも
+  // 予測不能な文字列(ID参照の破壊・コンテキスト汚染)を防ぐ(独立レビュー 2026-10-02)。
+  if (!/^[a-z0-9_-]{1,40}$/i.test(id)) {
+    warnings.push("レイヤーIDが不正なため追加を除外しました。");
+    return null;
+  }
   return {
     op: "add_layer",
     layer: {
-      id: layer.id.trim().slice(0, 40),
+      id,
       name: layer.name.trim().slice(0, 80),
-      color: typeof layer.color === "string" ? layer.color : "#5b6b7a",
+      color: typeof layer.color === "string" && /^#[0-9a-f]{6}$/i.test(layer.color) ? layer.color : "#5b6b7a",
       printable: layer.printable !== false
     }
   };
@@ -405,27 +412,44 @@ function buildUpdateLayerCommand(drawing, command, warnings) {
     warnings.push(`存在しないレイヤーのため更新を除外しました: ${String(id)}`);
     return null;
   }
-  if (!command.patch || typeof command.patch !== "object") {
-    warnings.push(`更新内容が不正なため除外しました: ${id}`);
+  const rawPatch = command.patch && typeof command.patch === "object" ? command.patch : {};
+  const patch = {};
+  for (const [key, value] of Object.entries(rawPatch)) {
+    if (["visible", "locked", "printable"].includes(key) && typeof value === "boolean") patch[key] = value;
+    if (key === "name" && typeof value === "string" && value.trim()) patch.name = value.trim().slice(0, 80);
+    if (key === "color" && typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)) patch.color = value;
+  }
+  if (Object.keys(patch).length === 0) {
+    warnings.push(`有効な更新内容がないため除外しました: ${id}`);
     return null;
   }
-  return { op: "update_layer", id, patch: command.patch };
+  return { op: "update_layer", id, patch };
 }
 
 function buildUpdateLayoutCommand(command, warnings) {
-  if (!command.patch || typeof command.patch !== "object") {
+  const rawPatch = command.patch && typeof command.patch === "object" ? command.patch : {};
+  const patch = {};
+  if (["A4", "A3", "A2", "A1"].includes(rawPatch.paper)) patch.paper = rawPatch.paper;
+  if (["portrait", "landscape"].includes(rawPatch.orientation)) patch.orientation = rawPatch.orientation;
+  if (Number.isFinite(Number(rawPatch.scale)) && Number(rawPatch.scale) > 0) patch.scale = Number(rawPatch.scale);
+  if (Number.isFinite(Number(rawPatch.margin)) && Number(rawPatch.margin) >= 0) patch.margin = Number(rawPatch.margin);
+  if (typeof rawPatch.title === "string") patch.title = rawPatch.title.slice(0, 100);
+  if (Object.keys(patch).length === 0) {
     warnings.push("レイアウト設定が不正なため除外しました。");
     return null;
   }
-  return { op: "update_layout", patch: command.patch };
+  return { op: "update_layout", patch };
 }
 
 function buildUpdateDrawingMetaCommand(command, warnings) {
-  if (!command.patch || typeof command.patch !== "object") {
+  const rawPatch = command.patch && typeof command.patch === "object" ? command.patch : {};
+  const patch = {};
+  if (typeof rawPatch.name === "string" && rawPatch.name.trim()) patch.name = rawPatch.name.trim().slice(0, 120);
+  if (Object.keys(patch).length === 0) {
     warnings.push("図面情報が不正なため除外しました。");
     return null;
   }
-  return { op: "update_drawing_meta", patch: command.patch };
+  return { op: "update_drawing_meta", patch };
 }
 
 function layerUsable(drawing, layerId, warnings, action) {
@@ -471,4 +495,11 @@ function inPaperBounds(bounds) {
     bounds.maxX <= PAPER_BOUNDS.maxX + 1 &&
     bounds.maxY <= PAPER_BOUNDS.maxY + 1
   );
+}
+
+// <drawing_context>に埋め込むレイヤー名・図形IDからタグ文字(<>)を除去し、指示タグ構造の
+// 破壊を防ぐ(独立レビュー 2026-10-02)。利用者はレイヤー名等を自由に設定できるため、
+// 埋め込み前にエスケープして出力検証に加えた防衛層を足す。
+function escapeContext(value) {
+  return String(value).replace(/[<>]/g, "");
 }

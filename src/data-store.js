@@ -233,6 +233,9 @@ class PostgresDataStore {
                select 1 from information_schema.triggers
                where event_object_table = 'audit_logs' and trigger_name = 'audit_logs_no_delete'
              ) and exists (
+               select 1 from information_schema.triggers
+               where event_object_table = 'audit_logs' and trigger_name = 'audit_logs_no_truncate'
+             ) and exists (
                select 1 from information_schema.columns
                where table_schema = 'public' and table_name = 'projects' and column_name = 'access_scope'
              ) and exists (
@@ -253,7 +256,7 @@ class PostgresDataStore {
       mode: "connected",
       database: rows[0].database,
       migrated: rows[0].migrated,
-      migration: "0007_project_membership.sql"
+      migration: "0008_audit_truncate_guard.sql"
     };
   }
 
