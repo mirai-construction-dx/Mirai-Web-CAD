@@ -500,6 +500,20 @@ function inPaperBounds(bounds) {
 // <drawing_context>に埋め込むレイヤー名・図形IDからタグ文字(<>)を除去し、指示タグ構造の
 // 破壊を防ぐ(独立レビュー 2026-10-02)。利用者はレイヤー名等を自由に設定できるため、
 // 埋め込み前にエスケープして出力検証に加えた防衛層を足す。
+//
+// あわせてメールアドレス等の個人識別子を伏せる(品質テストで検出、2026-10-02)。
+// buildSystemPrompt は利用者制御のレイヤー名・図形IDを <drawing_context> に埋め込み、
+// LLMフォールバック時に外部Providerへ送出するため、メールは必ず伏せる。
+// 正規表現は redactPublicDrawing(api-handler.js)と同一。
+const EMAIL_PATTERN = /[\p{L}\p{N}\p{M}._%+-]+@[\p{L}\p{N}\p{M}-]+(?:\.[\p{L}\p{N}\p{M}-]+)+/gu;
+const REDACTED_EMAIL = "[メールアドレス省略]";
+// 内線番号など、数字を伴う個人識別子。メール以外の代表例として内線番号も伏せる。
+const EXTENSION_PATTERN = /内線[\s:：]*\d+/g;
+const REDACTED_EXTENSION = "内線[省略]";
+
 function escapeContext(value) {
-  return String(value).replace(/[<>]/g, "");
+  return String(value)
+    .replace(/[<>]/g, "")
+    .replace(EMAIL_PATTERN, REDACTED_EMAIL)
+    .replace(EXTENSION_PATTERN, REDACTED_EXTENSION);
 }
