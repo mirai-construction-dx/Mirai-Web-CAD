@@ -275,14 +275,17 @@ class PostgresDataStore {
                select 1 from information_schema.columns
                where table_schema = 'public' and table_name = 'drawings' and column_name = 'visibility'
              ) and exists (
-               select 1 from information_schema.triggers
-               where event_object_table = 'audit_logs' and trigger_name = 'audit_logs_no_update'
+               select 1 from pg_trigger
+               where tgrelid = 'audit_logs'::regclass and not tgisinternal and tgname = 'audit_logs_no_update'
              ) and exists (
-               select 1 from information_schema.triggers
-               where event_object_table = 'audit_logs' and trigger_name = 'audit_logs_no_delete'
+               select 1 from pg_trigger
+               where tgrelid = 'audit_logs'::regclass and not tgisinternal and tgname = 'audit_logs_no_delete'
              ) and exists (
-               select 1 from information_schema.triggers
-               where event_object_table = 'audit_logs' and trigger_name = 'audit_logs_no_truncate'
+               -- TRUNCATE拒否トリガは文レベル(for each statement)のため information_schema.triggers では
+               -- 検出できず migrated が誤って false になる。pg_trigger(内部カタログ)で検証する
+               -- (verify-database.sh と同じ方式、独立レビュー L-4)。
+               select 1 from pg_trigger
+               where tgrelid = 'audit_logs'::regclass and not tgisinternal and tgname = 'audit_logs_no_truncate'
              ) and exists (
                select 1 from information_schema.columns
                where table_schema = 'public' and table_name = 'projects' and column_name = 'access_scope'
