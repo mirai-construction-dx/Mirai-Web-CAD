@@ -2648,6 +2648,14 @@ async function applyAiProposal() {
     return;
   }
 
+  // オフライン時は承認API・監査記録を経ずにブラウザ内で適用されていた(独立レビュー 2026-10-02、M-3)。
+  // AI提案の適用はサーバー側の承認(agent.approved監査)を必須とするため、未接続時は適用しない。
+  if (!state.apiStatus.connected) {
+    log("AI提案の適用にはサーバー接続が必要です。オンライン復帰後に再試行してください。");
+    render();
+    return;
+  }
+
   const result = applyTransaction(state.drawing, proposalToTransaction(state.previewProposal, state.drawing.currentRole));
   if (!result.ok) {
     log(`AI適用失敗: ${result.error}`);

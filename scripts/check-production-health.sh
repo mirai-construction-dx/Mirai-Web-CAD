@@ -58,9 +58,12 @@ fi
 write_status="$(curl --silent --show-error --max-time 20 --output /dev/null \
   --write-out '%{http_code}' -X POST -H 'content-type: application/json' \
   -d '{}' "${public_url}${write_probe_path}")"
+# 未認証の書込みはエッジ層のAccessで302(ログインリダイレクト)、アプリ層到達で401が期待値。
+# 403(認証済みだが権限不足)は匿名リクエストでは想定外のため、synthetic-monitor.ymlと判定を
+# 統一して302/401のみを許容する(独立レビュー 2026-10-02)。
 case "$write_status" in
-  302|401|403) : ;;
-  *) echo "production health check FAILED: unauthorized write returned ${write_status} (expected 302/401/403)" >&2
+  302|401) : ;;
+  *) echo "production health check FAILED: unauthorized write returned ${write_status} (expected 302/401)" >&2
      exit 1 ;;
 esac
 

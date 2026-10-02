@@ -384,3 +384,61 @@ test("成功した操作の予約は解放されない(二重実行は409のま�
   assert.equal((await patch()).status, 200);
   assert.equal((await patch()).status, 409);
 });
+
+// op:"add"はcommand.entityが必須。欠落/null/空オブジェクトだとcad-core.jsの
+// command.entity.layerId参照がTypeError→500になるため、入力境界で400に倒す
+// (独立レビュー 2026-10-02)。
+test("op:addでentityが欠落・null・空の場合は500ではなく400で拒否する", async () => {
+  resetMemoryStore();
+  await createBlankDrawing("dwg_add_entity");
+  for (const [index, command] of [{ op: "add" }, { op: "add", entity: null }, { op: "add", entity: {} }].entries()) {
+    const response = await handleApiRequest(
+      transactionRequest("dwg_add_entity", { commands: [command], expectedVersion: "1", key: `tx-add-entity-${index}` }),
+      env
+    );
+    assert.equal(response.status, 400, `${JSON.stringify(command)} は400で拒否されるべき`);
+  }
+});
+
+// 不正なパーセント符号でdecodeURIComponentがURIError→500になっていた(独立レビュー 2026-10-02)。
+test("DELETEメンバーの不正なパーセント符号は500ではなく400で拒否する", async () => {
+  resetMemoryStore();
+  const created = await handleApiRequest(
+    new Request("https://example.test/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-demo-role": "cad_admin", "idempotency-key": "del-member-proj" },
+      body: JSON.stringify({ id: "prj_del_member", name: "メンバー削除検証" })
+    }),
+    env
+  );
+  assert.equal(created.status, 201);
+  const response = await handleApiRequest(
+    new Request("https://example.test/api/projects/prj_del_member/members/%E0%A", {
+      method: "DELETE",
+      headers: { "x-demo-role": "cad_admin" }
+    }),
+    env
+  );
+  assert.equal(response.status, 400);
+});
+
+// labelに長さ上限が無くcommand_events.label(text)と監査detailが肥大化し得た(独立レビュー 2026-10-02)。
+// 200文字へ切り詰めて保存する。長大なlabelでもエラーにならず適用できることを確認する。
+test("長大なlabelでも200で適用でき、エラーにならない", async () => {
+  resetMemoryStore();
+  await createBlankDrawing("dwg_label_cap");
+  const response = await handleApiRequest(
+    new Request("https://example.test/api/drawings/dwg_label_cap/transactions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-demo-role": "drafter",
+        "idempotency-key": "tx-label-cap",
+        "expected-version": "1"
+      },
+      body: JSON.stringify({ label: "x".repeat(5000), commands: [{ op: "set_empty_drawing_unit", unit: "m" }] })
+    }),
+    env
+  );
+  assert.equal(response.status, 200);
+});

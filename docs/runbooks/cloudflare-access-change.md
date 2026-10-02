@@ -1,6 +1,6 @@
 # Cloudflare Access変更Runbook
 
-Access変更は`infra/cloudflare/`のTerraformだけで行い、緊急時を除きダッシュボードから直接変更しません。MVPの許可対象は`kensan1969@gmail.com`だけです。
+MVP(`mirai-web-cad-mvp.mirai-dx-platform.com`)のAccess変更は`infra/cloudflare/`のTerraformで行い、緊急時を除きダッシュボードから直接変更しません。**本番ドメイン(`mirai-web-cad.mirai-dx-platform.com`)のAccess 3アプリ(`/api/health`・`/api/drawings/demo`のbypass、`/api/*`のallow)はTerraform管理外です**(独立レビュー 2026-10-02)。本番Accessの変更は別手順で実施し、いずれimportを経てTerraform管理へ移行します。MVPの許可対象は`kensan1969@gmail.com`だけです。
 
 ## 変更前
 

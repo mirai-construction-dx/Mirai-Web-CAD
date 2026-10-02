@@ -136,3 +136,67 @@ test("buildUserMessage wraps the prompt in a data tag and truncates overly long 
   assert.match(message, /^<user_request>/);
   assert.equal(message.length <= 2000 + "<user_request></user_request>".length, true);
 });
+
+test("buildSystemPrompt escapes < and > in layer names and entity ids", () => {
+  const drawing = seedDrawing();
+  drawing.layers[0].name = "悪意<injection>";
+  const prompt = buildSystemPrompt(drawing);
+  assert.doesNotMatch(prompt, /<injection>/);
+  assert.match(prompt, /悪意injection/);
+});
+
+test("normalizeLlmProposal allowlists update_layer patch and drops unknown fields", () => {
+  const drawing = seedDrawing();
+  const proposal = normalizeLlmProposal(drawing, {
+    status: "planned",
+    commands: [{ op: "update_layer", id: "layer-structure", patch: { visible: false, name: "構造物2", color: "#123456", evil: "x", locked: "not-bool" } }]
+  });
+  assert.equal(proposal.status, "planned");
+  const patch = proposal.commands[0].patch;
+  assert.equal(patch.visible, false);
+  assert.equal(patch.name, "構造物2");
+  assert.equal(patch.color, "#123456");
+  assert.equal("evil" in patch, false);
+  assert.equal("locked" in patch, false);
+});
+
+test("normalizeLlmProposal allowlists update_layout patch", () => {
+  const drawing = seedDrawing();
+  const proposal = normalizeLlmProposal(drawing, {
+    status: "planned",
+    commands: [{ op: "update_layout", patch: { paper: "A4", orientation: "landscape", scale: 50, evil: true } }]
+  });
+  assert.equal(proposal.status, "planned");
+  const patch = proposal.commands[0].patch;
+  assert.equal(patch.paper, "A4");
+  assert.equal(patch.orientation, "landscape");
+  assert.equal(patch.scale, 50);
+  assert.equal("evil" in patch, false);
+});
+
+test("normalizeLlmProposal allowlists update_drawing_meta patch", () => {
+  const drawing = seedDrawing();
+  const proposal = normalizeLlmProposal(drawing, {
+    status: "planned",
+    commands: [{ op: "update_drawing_meta", patch: { name: "新しい名前", evil: "x" } }]
+  });
+  assert.equal(proposal.status, "planned");
+  const patch = proposal.commands[0].patch;
+  assert.equal(patch.name, "新しい名前");
+  assert.equal("evil" in patch, false);
+});
+
+test("normalizeLlmProposal rejects add_layer with non-[a-z0-9_-] id and normalizes bad color", () => {
+  const drawing = seedDrawing();
+  const proposal = normalizeLlmProposal(drawing, {
+    status: "planned",
+    commands: [
+      { op: "add_layer", layer: { id: "layer<script>", name: "x" } },
+      { op: "add_layer", layer: { id: "layer-ok", name: "ok", color: "red" } }
+    ]
+  });
+  assert.equal(proposal.status, "planned");
+  assert.equal(proposal.commands.length, 1);
+  assert.equal(proposal.commands[0].layer.id, "layer-ok");
+  assert.equal(proposal.commands[0].layer.color, "#5b6b7a");
+});
