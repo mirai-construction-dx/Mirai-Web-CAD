@@ -17,9 +17,9 @@
     "success_rate_target": 0.9,
     "ci_success_rate": 1.0,
     "test_pass_rate": 1.0,
-    "unit_test_count": 221,
-    "e2e_test_count": 56,
-    "postgres_integration_test_count": 7,
+    "unit_test_count": 478,
+    "e2e_test_count": 119,
+    "postgres_integration_test_count": 9,
     "security_critical": 0,
     "blocker_count": 4
   },
@@ -99,7 +99,7 @@
       "id": "#8",
       "title": "本番バックアップ・監視・障害対応を自動化する",
       "severity": "medium",
-      "blocker_reason": "バックアップ・合成監視・Cloudflare Terraformコード/Runbookは導入済み。2026-09-05再実測でCloudflare token verify=200、Access apps=200/0件、DNS API=403のため実資源import/applyは停止。対象account/zone限定のTunnel/DNS/Access管理tokenと資源ID、当番の実名・連絡先・SLA参照IDが必要"
+      "blocker_reason": "バックアップ・合成監視・Cloudflare Terraformコード/Runbookは導入済み。2026-09-25にオフサイトバックアップ(age暗号化+R2転送)と失敗通知(notify-failure@.service)のコード・unit・テストを実装(H-3)したが、R2 token/age鍵/ユニット設置と初回試験はオーナーY/N待ちで未稼働。対象account/zone限定のTunnel/DNS/Access管理tokenと資源ID、当番の実名・連絡先・SLA参照IDも必要"
     },
     {
       "id": "#6",
@@ -129,5 +129,5 @@
       "Edit/Writeツールへ渡すJSON文字列パラメータ内で`\\u0000`等のUnicodeエスケープをテキストとして書こうとすると、JSON側の文字列デコードにより実際の制御バイトへ変換されてファイルに書き込まれてしまう(意図した`\\u0000`という6文字ではなく、実際のNULバイト1個になる)。正規表現の制御文字クラス(`/[\\u0000-\\u001f]/`等)をソースコードに書く際は、Edit/Writeツールを直接使わず、Pythonでのバイト列置換等でエスケープシーケンスのテキストそのもの(バックスラッシュ+u+16進数4桁)をファイルへ書き込む必要がある。NULバイトが混入するとgrep等がファイルをバイナリ扱いしテキスト検索が効かなくなる副作用もある"
     ]
   },
-  "last_updated": "2026-09-05T15:04:19+09:00"
+  "last_updated": "2026-10-02T09:00:00+09:00"
 }

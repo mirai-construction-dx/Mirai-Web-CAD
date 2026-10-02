@@ -68,6 +68,9 @@ const ALLOWED_TRANSACTION_OPS = new Set([
 // 1コマンドあたりの点列長の上限。全体はMAX_JSON_BYTESでも抑えているが、
 // 巨大な点列による計算量増大を入力境界で止める。
 const MAX_COMMAND_POINTS = 10_000;
+// トランザクションlabelの長さ上限。name=120/comment=1000に切っているのに対しlabelだけ無制限だった
+// (独立レビュー 2026-10-02)。command_events.label(text)と監査detailへの肥大化を防ぐ。
+const MAX_LABEL_CHARS = 200;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 // 追跡する利用者数(バケット×利用者)の上限。超えた場合は期限切れ→最も古い順に破棄する。
 const RATE_LIMIT_MAX_ENTRIES = 10_000;
@@ -176,10 +179,13 @@ export async function handleApiRequest(request, env = {}) {
       const idempotencyKey = requireIdempotency(request);
       await rejectClaimedIdempotency(store, idempotencyKey);
       requireExpectedVersion(request, drawing);
+      const label = typeof body.label === "string" && body.label.trim()
+        ? body.label.trim().slice(0, MAX_LABEL_CHARS)
+        : "API transaction";
       const result = applyTransaction(drawing, {
         source: "user",
         actor: actor.actor.id,
-        label: body.label ?? "API transaction",
+        label,
         commands
       });
       if (!result.ok) return json({ ok: false, error: result.error }, 409, cors);
@@ -190,7 +196,7 @@ export async function handleApiRequest(request, env = {}) {
       if (introduced.length > 0) {
         return json({ ok: false, error: `図形が不正なため保存できません: ${introduced[0].message}`, issues: introduced }, 400, cors);
       }
-      await saveMutationAtomically(store, result.drawing, actor.actor, "drawing.transaction", drawing.id, { label: body.label }, idempotencyKey, route);
+      await saveMutationAtomically(store, result.drawing, actor.actor, "drawing.transaction", drawing.id, { label }, idempotencyKey, route);
       return json({ ok: true, drawing: result.drawing, warnings: result.warnings }, 200, cors);
     }
 
@@ -398,9 +404,12 @@ export async function handleApiRequest(request, env = {}) {
       try {
         const id = typeof body.id === "string" && /^prj_[a-z0-9_-]{1,60}$/i.test(body.id) ? body.id : `prj_${cryptoSafeId()}`;
         const accessScope = body.accessScope === "restricted" ? "restricted" : "open";
-        const project = await store.createProject({ id, name: body.name.trim().slice(0, 100), owner: actor.actor.id, accessScope });
+        const name = body.name.trim().slice(0, 100);
+        const project = await store.createProjectAtomically(
+          { id, name, owner: actor.actor.id, accessScope },
+          createAuditEntry(actor.actor, "project.created", "project", id, { name, accessScope })
+        );
         if (!project) throw httpError(`案件IDは既に使用されています: ${id}`, 409);
-        await audit(store, actor.actor, "project.created", "project", project.id, { name: project.name, accessScope });
         return json({ ok: true, project }, 201, cors);
       } catch (error) {
         await releaseIdempotencyQuietly(store, idempotencyKey);
@@ -428,9 +437,12 @@ export async function handleApiRequest(request, env = {}) {
         throw httpError("同じIdempotency-Keyのリクエストは処理済みです。", 409);
       }
       try {
-        const project = await store.updateProjectAccessScope(projectMatch[1], body.accessScope);
+        const project = await store.updateProjectAccessScopeAtomically(
+          projectMatch[1],
+          body.accessScope,
+          createAuditEntry(actor.actor, "project.updated", "project", projectMatch[1], { accessScope: body.accessScope })
+        );
         if (!project) throw httpError(`案件が見つかりません: ${projectMatch[1]}`, 404);
-        await audit(store, actor.actor, "project.updated", "project", project.id, { accessScope: project.accessScope });
         return json({ ok: true, project }, 200, cors);
       } catch (error) {
         await releaseIdempotencyQuietly(store, idempotencyKey);
@@ -453,8 +465,12 @@ export async function handleApiRequest(request, env = {}) {
       try {
         const project = await store.getProject(projectMembersMatch[1]);
         if (!project) throw httpError(`案件が見つかりません: ${projectMembersMatch[1]}`, 404);
-        await store.addProjectMember(projectMembersMatch[1], body.member, actor.actor.id);
-        await audit(store, actor.actor, "project.member.added", "project", projectMembersMatch[1], { member: body.member.toLowerCase() });
+        await store.addProjectMemberAtomically(
+          projectMembersMatch[1],
+          body.member,
+          actor.actor.id,
+          createAuditEntry(actor.actor, "project.member.added", "project", projectMembersMatch[1], { member: body.member.toLowerCase() })
+        );
         const members = await store.listProjectMembers(projectMembersMatch[1]);
         return json({ ok: true, members }, 201, cors);
       } catch (error) {
@@ -468,9 +484,17 @@ export async function handleApiRequest(request, env = {}) {
       requireCadAdmin(actor.actor);
       const project = await store.getProject(projectMemberMatch[1]);
       if (!project) throw httpError(`案件が見つかりません: ${projectMemberMatch[1]}`, 404);
-      const member = decodeURIComponent(projectMemberMatch[2]);
-      await store.removeProjectMember(projectMemberMatch[1], member);
-      await audit(store, actor.actor, "project.member.removed", "project", projectMemberMatch[1], { member: member.toLowerCase() });
+      let member;
+      try {
+        member = decodeURIComponent(projectMemberMatch[2]);
+      } catch {
+        throw httpError("メンバー指定が不正です。", 400);
+      }
+      await store.removeProjectMemberAtomically(
+        projectMemberMatch[1],
+        member,
+        createAuditEntry(actor.actor, "project.member.removed", "project", projectMemberMatch[1], { member: member.toLowerCase() })
+      );
       const members = await store.listProjectMembers(projectMemberMatch[1]);
       return json({ ok: true, members }, 200, cors);
     }
@@ -789,6 +813,17 @@ function requireTransactionCommands(body) {
         throw httpError(`commands[${index}].${label}が上限(${MAX_COMMAND_POINTS})を超えています。`, 413);
       }
     }
+    // op:"add"はcommand.entityが必須。欠落/nullだとcad-core.jsのcommand.entity.layerId参照が
+    // TypeError→500になるため、入力境界で400に倒す(独立レビュー 2026-10-02)。点列長の検査を
+    // 先に行い、既存の413判定を保つ。
+    if (command.op === "add") {
+      if (!command.entity || typeof command.entity !== "object" || Array.isArray(command.entity)) {
+        throw httpError(`commands[${index}].entityが必要です(op:add)。`, 400);
+      }
+      if (typeof command.entity.layerId !== "string" || !command.entity.layerId) {
+        throw httpError(`commands[${index}].entity.layerIdが必要です(op:add)。`, 400);
+      }
+    }
   });
   return commands;
 }
@@ -910,7 +945,9 @@ function corsHeaders(env, requestId, requestOrigin) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,idempotency-key,expected-version,x-demo-role,x-demo-actor,x-request-id",
+    // 本番はAUTH_MODE=accessでdemoヘッダを使わないため、CORSの許可ヘッダから除外する
+    // (独立レビュー 2026-10-02)。ローカルdev(demo)は同一オリジン配信でCORS不要。
+    "access-control-allow-headers": "content-type,idempotency-key,expected-version,x-request-id",
     vary: "Origin",
     "x-request-id": requestId
   };
