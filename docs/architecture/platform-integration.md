@@ -1,6 +1,6 @@
 # 基盤連携の要件と現状(全体構成 V3.6 / リポジトリ構成 V3.6 / OS・アプリ選定 V3.5)
 
-更新日: 2026-09-25。基盤の設計文書がMirai-Web-CADに求める他リポジトリとの連携を抽出し、現状との差を記録する。
+更新日: 2026-10-02。基盤の設計文書がMirai-Web-CADに求める他リポジトリとの連携を抽出し、現状との差を記録する。
 正本の文書は複製しない(下表)。判断が必要な事項は推測で確定せず、[外部入力・確定待ち台帳](../external-input-status.md)の「4. 基盤V3.6との整合」に記録する。
 
 | 文書 | 正本(複製しない) |
@@ -33,7 +33,7 @@
 | AIの結果の反映に人間承認(承認者の分離・承認記録) | **未充足** | 反映には利用者の明示操作が必要だが、編集権限があれば誰でも適用でき、オフライン時は承認記録を残さない([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)) |
 | AIはModel Gateway(MCAH)経由。キーを持つのはGatewayのみ | **承認済み例外(期限付き)** | `src/ai-provider.js`がOpenAI/Anthropicを直接呼び、本番はキーを保持。[ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)(承認済み、見直し期限2026-12-25) |
 | Coreの版付き成果物を版・digest固定で取り込む(`core-lock/`等) | 未対応(現時点で利用対象なし) | Web-CADはCoreの契約(event/evidence/MCP)をまだ使っていない。取込み時の手順は§3 |
-| 基盤の台帳(Core `registries/systems.yaml`等)への登録 | 決定・登録申請中 | system_idは`web-cad`(2026-09-25オーナー決定)。Core PR #27で登録申請(audienceは論理値`api://web-cad`、MCPなし)。Platform-Infraの台帳は未作成 |
+| 基盤の台帳(Core `registries/systems.yaml`等)への登録 | **登録済み** | system_idは`web-cad`(2026-09-25オーナー決定)。**Core PR #27は2026-09-28にマージ済み(登録完了)**。Platform-Infraの台帳は未作成 |
 | MCPサーバー公開(契約はCoreで版管理、`server_id`+`tool_name`のAllowlist) | 未対応 | 第3段階。ツール仕様は文書に無い |
 | 案件IDはMCIPが発番 | 不整合(将来) | `migrations/0001`の独自`projects`と`0007`の`project_members` |
 | 確定版をCDEへ登録 | 未対応 | CDE連携なし。承認済み版はWeb-CAD内で保持 |
@@ -48,13 +48,13 @@
 
 決定(2026-09-25、台帳§4の6): **CoreのGitHub Releaseからのみ取り込む**。タグの内容をvendoringする方式(他Consumerの暫定方式)は使わない。
 
-1. 取り込む契約(例: `schemas/evidence/*`、`schemas/event/envelope.schema.json`、MCP tool定義)と、それを含むReleaseを選ぶ。必要な版がReleaseされていなければCoreへRelease作成を依頼する(2026-09-25時点でReleaseは`v0.1.0`のみ。タグは`v0.6.0`まであるがReleaseではない)。
+1. 取り込む契約(例: `schemas/evidence/*`、`schemas/event/envelope.schema.json`、MCP tool定義)と、それを含むReleaseを選ぶ。必要な版がReleaseされていなければCoreへRelease作成を依頼する(2026-10-02時点でReleaseは`v0.1.0`と`v0.7.0`(Latest))。
 2. Releaseの`SHA256SUMS`で成果物のハッシュを照合し、Coreの利用者ガイド(`docs/consumer-guide.md`)の手順どおり`contracts.lock.json`で版・ダイジェストを固定して`mhc verify`を通す。`contracts/`配下は取得物として手編集しない。`latest`・main直参照・submoduleは使わない。
-3. **署名・来歴証明(attestation)の検証を必須とする**。CoreのRelease手順は`actions/attest-build-provenance`と署名に対応しているが、署名鍵の設定待ちで無効。`v0.1.0`の成果物にはattestationが無い(2026-09-25にGitHub APIで404を確認)。取り込む時点で署名・attestationが無いReleaseしか無い場合は、署名付きReleaseをCoreへ依頼し、それまで取り込まない。
+3. **署名・来歴証明(attestation)の検証を必須とする**。CoreのRelease手順は`actions/attest-build-provenance`と署名に対応しているが、署名鍵の設定待ちで無効。`v0.7.0`(Latest)の成果物にもattestationが無い(2026-10-02にGitHub APIで404を確認)。取り込む時点で署名・attestationが無いReleaseしか無い場合は、署名付きReleaseをCoreへ依頼し、それまで取り込まない。
 4. CIで`mhc verify`とlockのダイジェスト照合を実行する。
-5. system_idは`web-cad`(Core PR #27で登録申請中)。
+5. system_idは`web-cad`(**Core PR #27で登録済み、2026-09-28 merge**)。
 
-参考(照合用、取込みは未実施): Core Release `v0.1.0` の`contracts.tar.gz`のSHA256は`bbbacae714dcecb3102fbacf0e51e0f538eb04fcc32c0de9bd5ca2ddb0949c26`(同Releaseの`SHA256SUMS`)。
+参考(照合用、取込みは未実施): Core Release `v0.7.0`(Latest) の`contracts.tar.gz`のSHA256は`c98851835c2b2b3ebbaa0fcadb26581cb902026c98c0f621854e2396f749ce90`(同Releaseの`SHA256SUMS`)。
 
 ## 4. 監査・AI実行記録とCore evidence schemaの対応(現状)
 
