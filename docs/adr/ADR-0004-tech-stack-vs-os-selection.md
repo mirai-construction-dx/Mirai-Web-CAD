@@ -1,5 +1,7 @@
 # ADR-0004: 技術スタックとOS・アプリケーション選定 V3.5 の標準との差の扱い
 
+Deviates-from: MCDX-ADR-0003 — 本番 DB は PostgreSQL 16。PostgreSQL 18 への更新期限は 2027-11-30（本 ADR の決定）
+
 ## ステータス
 
 承認済み(Accepted、2026-09-25) — オーナーの委任によりCTOが決定。アプリ構成は例外として維持し、実行環境(Node・PostgreSQL)だけを期限付きで標準へ更新する。
