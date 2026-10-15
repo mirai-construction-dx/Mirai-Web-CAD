@@ -71,3 +71,34 @@ variable "production_dns_record_id" {
   type        = string
   default     = ""
 }
+
+# Staging(ADR-0005)。実資源のIDは推測せず、read-only棚卸しまでプレースホルダのままにする。
+
+variable "staging_allowed_email" {
+  description = "The only human identity allowed to access the Staging application."
+  type        = string
+  default     = "kensan1969@gmail.com"
+
+  validation {
+    condition     = lower(trimspace(var.staging_allowed_email)) == "kensan1969@gmail.com"
+    error_message = "Staging access must remain restricted to kensan1969@gmail.com."
+  }
+}
+
+variable "staging_access_application_id" {
+  description = "Existing Staging Access application UUID; filled after inventory, never guessed."
+  type        = string
+  default     = ""
+}
+
+variable "staging_access_policy_id" {
+  description = "Existing allow policy UUID embedded in the inventoried Staging Access application."
+  type        = string
+  default     = ""
+}
+
+variable "staging_dns_record_id" {
+  description = "Existing Staging CNAME record ID for mirai-web-cad-stg.mirai-dx-platform.com."
+  type        = string
+  default     = ""
+}

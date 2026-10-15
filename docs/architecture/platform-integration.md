@@ -1,6 +1,6 @@
 # 基盤連携の要件と現状(全体構成 V3.6 / リポジトリ構成 V3.6 / OS・アプリ選定 V3.5)
 
-更新日: 2026-10-02。基盤の設計文書がMirai-Web-CADに求める他リポジトリとの連携を抽出し、現状との差を記録する。
+更新日: 2026-10-16。基盤の設計文書がMirai-Web-CADに求める他リポジトリとの連携を抽出し、現状との差を記録する。
 正本の文書は複製しない(下表)。判断が必要な事項は推測で確定せず、[外部入力・確定待ち台帳](../external-input-status.md)の「4. 基盤V3.6との整合」に記録する。
 
 | 文書 | 正本(複製しない) |
@@ -76,3 +76,25 @@ Core `schemas/evidence/ai-run.schema.json`と`schemas/event/envelope.schema.json
 
 - 実施済み: `CLAUDE.md`・`AGENTS.md`の新設、本文書、ADR-0003(承認済み)/0004(承認済み)、判断事項の台帳化と2026-09-25のオーナー決定の反映。
 - 他リポジトリ・設計判断が必要(記録のみ。本リポジトリでは実施しない): 台帳§4を参照。
+
+## 6. 他Repository連携の2026-10-16確認とStaging環境の位置付け
+
+Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しいリポジトリ間結合を追加しない**。上記「許可する接続は原則4種類」の枠内に留まり、接続形態は本番・MVPと同一である。
+
+### 6.1 2026-10-16に読み取りで確認した事実
+
+| 確認項目 | 結果 | 根拠 |
+| --- | --- | --- |
+| Web-CADのCore登録 | **登録済み** | `mirai-construction-dx/Mirai-Harness-Core` の `origin/main` `registries/systems.yaml` に `{id: web-cad, name: Mirai-Web-CAD, repo: Mirai-Web-CAD, audience: "api://web-cad", mcp_server_id: null, db_schema: mirai_web_cad}` が存在(PR #27、2026-09-28) |
+| Core の版 | main は 0.8.0、GitHub Release は `v0.7.0`(Latest) | `gh release list` と Core の `docs/pr-integration-readiness-2026-10-05.md`(origin/main `243d474`、0.8.0) |
+| Core成果物の真正性 | 未確立(署名・attestation なし) | 本文書§3。`registries/signing-keys.yaml` は `keys: []`。取り込みは署名付きReleaseの作成待ち |
+| Core のマージ規定 | 自動マージ(チェック成功のみ) | Core の CONTRIBUTING/ADR-0019 および active ruleset。本リポジトリの中央ポリシー v2 と整合 |
+| 他Consumerの連携状況 | MCIP/MCAH/CDP/CEOS の4系統が pin を保持。CDPは `civil-docs-platform`/MCP `cdocs` 等の名前を区別 | Core `docs/integration-audit-2026-10-05.md` |
+| Portfolio の設計台帳 | 12リポジトリの1つとして Web-CAD を掲載(repo_key は system_id ではない) | `Mirai-Construction-DX-Portfolio` `catalog/repositories.yaml` |
+
+### 6.2 Stagingが変えないこと
+
+- AI Provider の直接呼出し(ADR-0003 の期限付き例外)は本番と同じくStagingでも継続し、新しい経路を作らない。Model Gateway(MCAH)への移行時に本番と同時に切り替える。
+- 案件ID(MCIP発番)・確定版(CDE登録)・MCP公開は第3段階のままとし、Stagingでは実装しない。Stagingのデータは使い捨てで、本番・MCIP・CDEへは送らない。
+- Core成果物の取り込み(`core-lock/`)は、署名付きReleaseが用意できるまで本番・Stagingともに行わない。
+- migrationは自リポジトリのschemaだけを対象とする。他システムDBへ接続しない。

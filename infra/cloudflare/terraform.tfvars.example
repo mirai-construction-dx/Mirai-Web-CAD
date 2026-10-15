@@ -13,3 +13,11 @@ mvp_access_application_id = "00000000-0000-0000-0000-000000000000"
 mvp_access_policy_id      = "00000000-0000-0000-0000-000000000000"
 mvp_dns_record_id          = "00000000000000000000000000000000"
 production_dns_record_id   = "00000000000000000000000000000000"
+
+# Staging(ADR-0005)。これらはオーナーがread-only棚卸し後に記入する(to be filled by owner)。
+# 0000...のプレースホルダのままなら local.staging_inventory_ready=false となり、
+# Staging資源はplan/applyの対象にならない。実IDを推測してはならない。
+staging_allowed_email         = "kensan1969@gmail.com"
+staging_access_application_id = "00000000-0000-0000-0000-000000000000"
+staging_access_policy_id      = "00000000-0000-0000-0000-000000000000"
+staging_dns_record_id         = "00000000000000000000000000000000"

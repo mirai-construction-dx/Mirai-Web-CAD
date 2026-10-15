@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirai Web CAD Staging weekly isolated restore drill timer
+
+[Timer]
+OnCalendar=Sun *-*-* 04:50:00 Asia/Tokyo
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

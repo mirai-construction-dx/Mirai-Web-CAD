@@ -56,14 +56,26 @@ case "$1 \${2:-}" in
   "run build") mkdir -p dist; printf '{"commit":"%s"}' "$BUILD_COMMIT" > dist/build-info.json ;;
   "run db:check") echo "db:check $DATABASE_URL" >> "${log}"; [[ "$DATABASE_URL" == "\${STUB_DBCHECK_FAIL:-none}" ]] && exit 1; exit 0 ;;
 esac`);
-  // MVPのユニットは、systemdと同じく値を引用符で囲んだ環境ファイルを読む想定にする。
+  // MVPとStagingのユニットは、systemdと同じく値を引用符で囲んだ環境ファイルを読む想定にする。
   const mvpEnv = path.join(root, "units/mvp.env");
+  const stagingEnv = path.join(root, "units/staging.env");
   mkdirSync(path.dirname(mvpEnv));
   writeFileSync(mvpEnv, 'NODE_ENV=production\nDATABASE_URL="postgresql://stub.invalid/mvp"\n');
+  writeFileSync(stagingEnv, 'NODE_ENV=production\nDATABASE_URL="postgresql://stub.invalid/staging"\n');
+  // STUB_MVP/STUB_STAGINGが設定されたサービスのユニットだけが「設置済み」として応答する。
   stub(bin, "systemctl", `
-[[ -z "\${STUB_MVP:-}" ]] && exit 1
-[[ "$1" == "cat" ]] && exit 0
-[[ "$1" == "show" ]] && echo "${mvpEnv} (ignore_errors=no)"
+svc=""
+for a in "$@"; do svc="$a"; done
+case "$1" in
+  cat)
+    [[ "$svc" == "mirai-web-cad-mvp.service" && -n "\${STUB_MVP:-}" ]] && exit 0
+    [[ "$svc" == "mirai-web-cad-staging.service" && -n "\${STUB_STAGING:-}" ]] && exit 0
+    exit 1 ;;
+  show)
+    [[ "$svc" == "mirai-web-cad-mvp.service" ]] && { echo "${mvpEnv} (ignore_errors=no)"; exit 0; }
+    [[ "$svc" == "mirai-web-cad-staging.service" ]] && { echo "${stagingEnv} (ignore_errors=no)"; exit 0; }
+    exit 1 ;;
+esac
 exit 0`);
   stub(bin, "sudo", `echo "sudo $*" >> "${log}"`);
   // healthは作業ツリーのHEADと、dist(symlinkを辿る)のbuild元を返す。STUB_BREAK_COMMITに一致すれば不健全。
@@ -199,4 +211,49 @@ test("rollback to a legacy dist without build-info.json is verified by health an
     assert.match(result.output, new RegExp(`ロールバック完了: ${v1}`));
     assert.doesNotMatch(result.output, /ロールバック後の確認に失敗/);
   }, { legacyBuildInfo: false });
+});
+
+test("staging is verified and its database checked when its unit is installed", () => {
+  withRepo(({ work, v2, env, log }) => {
+    const result = deploy(work, { ...env, STUB_STAGING: "1" });
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, new RegExp(`デプロイ成功: ${v2}`));
+    const recorded = calls(log);
+    // Stagingのユニットが読む環境ファイルの値を、外側の引用符を外して使う。
+    assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/staging$/m);
+    assert.match(recorded, /sudo systemctl restart mirai-web-cad-staging.service/);
+    // Stagingが設置されていても、MVP未設置ならMVPには触れない。
+    assert.doesNotMatch(recorded, /mvp/);
+  });
+});
+
+test("staging is skipped when its unit is not installed", () => {
+  withRepo(({ work, v2, env, log }) => {
+    const result = deploy(work, { ...env, STUB_MVP: "1" });
+    assert.equal(result.status, 0, result.output);
+    const recorded = calls(log);
+    assert.doesNotMatch(recorded, /staging/);
+    // MVPは設置済みなので従来どおり対象になる。
+    assert.match(recorded, /sudo systemctl restart mirai-web-cad-mvp.service/);
+  });
+});
+
+test("a failing staging db:check aborts before anything live changes", () => {
+  withRepo(({ work, v1, env, log }) => {
+    const result = deploy(work, { ...env, STUB_STAGING: "1", STUB_DBCHECK_FAIL: "postgresql://stub.invalid/staging" });
+    assert.notEqual(result.status, 0);
+    assert.equal(git(work, "rev-parse", "HEAD"), v1);
+    assert.ok(!lstatSync(path.join(work, "dist")).isSymbolicLink(), "live dist must stay untouched");
+    assert.doesNotMatch(calls(log), /systemctl restart/);
+  });
+});
+
+test("an unhealthy release rolls staging back too when its unit is installed", () => {
+  withRepo(({ work, v1, v2, env, log }) => {
+    const result = deploy(work, { ...env, STUB_STAGING: "1", STUB_BREAK_COMMIT: v2 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, new RegExp(`ロールバック完了: ${v1}`));
+    // 本処理と rollback の両方で、本番とStagingを再起動する。
+    assert.equal(calls(log).match(/restart mirai-web-cad-staging.service/g).length, 2);
+  });
 });
