@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirai Web CAD Staging backup freshness check timer
+
+[Timer]
+OnCalendar=*-*-* 06:45:00 Asia/Tokyo
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

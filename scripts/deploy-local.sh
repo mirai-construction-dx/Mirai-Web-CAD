@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# mainブランチの最新コミットをこのホストへ反映し、本番(mirai-web-cad.service)とMVP
-# (mirai-web-cad-mvp.service、設置されている場合)を再起動する。GitHub Actions(クラウド
+# mainブランチの最新コミットをこのホストへ反映し、本番(mirai-web-cad.service)・MVP
+# (mirai-web-cad-mvp.service)・Staging(mirai-web-cad-staging.service)のうち、設置されて
+# いるサービスを再起動する。GitHub Actions(クラウド
 # hosted runner)からはこのローカルマシンへ直接到達できないため、人間が手動実行する
 # (docs/deployment-local.md参照)。
 #
@@ -8,11 +9,11 @@
 # npm ci と build を実行していたため、依存が一時的に消え、未検証の画面が先に配信されていた
 # (2026-09-25 独立レビュー H-1)。現在は次の順で行う。
 #   1. 対象commitを .releases/<sha>/ へ書き出し、そこで依存導入とbuildを行う(稼働中は無変更)
-#   2. 本番DB・MVP DBへ読み取り専用の db:check(失敗したら何も切り替えずに中止)
+#   2. 本番DB・MVP DB・Staging DBへ読み取り専用の db:check(失敗したら何も切り替えずに中止)
 #   3. 作業ツリーをfast-forwardし、dist と node_modules を .releases/<sha>/ へのsymlinkとして
 #      一度に切り替える
-#   4. 両サービスを再起動し、稼働commitと配信物のbuild元commitが対象commitと一致するか確認
-#   5. 失敗したら、作業ツリー・symlinkを直前の状態へ戻して両サービスを再起動する
+#   4. 対象サービスを再起動し、稼働commitと配信物のbuild元commitが対象commitと一致するか確認
+#   5. 失敗したら、作業ツリー・symlinkを直前の状態へ戻して対象サービスを再起動する
 # -E: 関数内の失敗でもERR trap(ロールバック)を働かせる。
 set -Eeuo pipefail
 ROOT="${DEPLOY_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -78,6 +79,27 @@ if systemctl cat "$mvp_service" >/dev/null 2>&1; then
   fi
 fi
 
+# StagingもMVPと同じく、ユニットが設置されている場合だけ対象にする(ADR-0005)。接続先の
+# 取得方法もMVPと同一で、EnvironmentFile=の1変数をsedで読み、引用符を外す。
+staging_service="mirai-web-cad-staging.service"
+staging_enabled=0
+if systemctl cat "$staging_service" >/dev/null 2>&1; then
+  staging_enabled=1
+  staging_env_file="$(systemctl show -p EnvironmentFiles --value "$staging_service" 2>/dev/null | awk 'NR == 1 { print $1 }' || true)"
+  staging_env_file="${staging_env_file:-$HOME/.config/mirai-web-cad/staging.env}"
+  STAGING_DATABASE_URL=""
+  if [[ -r "$staging_env_file" ]]; then
+    STAGING_DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' "$staging_env_file" | head -n 1)"
+    if [[ "$STAGING_DATABASE_URL" =~ ^\"(.*)\"$ || "$STAGING_DATABASE_URL" =~ ^\'(.*)\'$ ]]; then
+      STAGING_DATABASE_URL="${BASH_REMATCH[1]}"
+    fi
+  fi
+  if [[ -z "$STAGING_DATABASE_URL" ]]; then
+    echo "${staging_service} が設置されていますが、StagingのDATABASE_URLを取得できません(${staging_env_file})。中止します。" >&2
+    exit 1
+  fi
+fi
+
 # 1. 稼働中のツリーに触れずに、対象commitを書き出してbuildする。
 releases_dir=".releases"
 release_rel="$releases_dir/$new_sha"
@@ -100,12 +122,15 @@ else
   mv "$release_rel.tmp" "$release_rel"
 fi
 
-# 2. 本番DB・MVP DBへ読み取り専用の検証(改善台帳P0-74)。migrationは適用しないため、
+# 2. 本番DB・MVP DB・Staging DBへ読み取り専用の検証(改善台帳P0-74)。migrationは適用しないため、
 #    migrationを含むリリースは手順書「Migrationを含むリリース」に従って先に適用しておく。
 #    ここで失敗しても、稼働中の作業ツリーは何も変わっていない。
 (cd "$release_rel" && npm run db:check)
 if [[ "$mvp_enabled" == "1" ]]; then
   (cd "$release_rel" && DATABASE_URL="$MVP_DATABASE_URL" npm run db:check)
+fi
+if [[ "$staging_enabled" == "1" ]]; then
+  (cd "$release_rel" && DATABASE_URL="$STAGING_DATABASE_URL" npm run db:check)
 fi
 
 # 3. 切り替え。以降に失敗した場合はrollbackで直前の状態へ戻す。
@@ -137,6 +162,9 @@ prev_modules="$(link_target node_modules)"
 services=("mirai-web-cad.service:${PORT:-18812}")
 if [[ "$mvp_enabled" == "1" ]]; then
   services+=("${mvp_service}:${MVP_PORT:-18813}")
+fi
+if [[ "$staging_enabled" == "1" ]]; then
+  services+=("${staging_service}:${STAGING_PORT:-18814}")
 fi
 
 # 稼働中のプロセスが、指定commitのサーバーコードと配信物を使っているかを確認する。
@@ -198,7 +226,7 @@ git merge --ff-only "$new_sha"
 point_to node_modules "$release_rel/node_modules"
 point_to dist "$release_rel/dist"
 
-# 4. 両サービスを再起動して確認する。
+# 4. 対象サービスを再起動して確認する。
 restart_services
 trap - ERR
 if ! verify_services "$new_sha"; then

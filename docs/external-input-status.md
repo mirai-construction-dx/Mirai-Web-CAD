@@ -56,6 +56,8 @@
 | 7. 案件ID・確定版・MCP | **決定** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続し、MCIPの案件ID API公開時に外部ID列をadditive migrationで追加。確定版: CDEのAPI公開時に承認済み版を登録。MCP: 読み取り系ツールから、Coreで契約化→Allowlist登録の順 |
 | 8. Organization名 | **決定** | `mirai-construction-dx`に統一。原典(全体構成 V3.6)のHTMLは変更せず、Portfolioの未決事項表(PORT-BL-001 BL-06)に決定を記録(Portfolio PR #20) |
 
+2026-10-16に読み取りで再確認: Core `origin/main` の `registries/systems.yaml` に `web-cad` が登録済み。Core main は 0.8.0、GitHub Release の Latest は `v0.7.0`(署名・attestationは依然なし)、Core のマージ規定も自動マージへ統一済み。他Consumerの pin 状況は Core `docs/integration-audit-2026-10-05.md` を参照。Staging環境([ADR-0005](adr/ADR-0005-staging-environment.md))は第3段階まで新しいリポジトリ間結合を追加しない。
+
 ### 1名承認体制の補完策(2026-09-25)
 
 | 弱点 | 補完策 | 状態 |

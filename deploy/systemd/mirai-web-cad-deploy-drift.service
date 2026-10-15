@@ -18,8 +18,9 @@ Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v2
 # --url で稼働中プロセスのcommitも突き合わせる(作業ツリーだけでは再起動漏れを検出できない)。
 # Type=oneshotの複数ExecStartは先行行の失敗で後続行を実行しないため、単一のbashで
 # 本番(18812)とMVP(18813)を両方実行し、どちらか片方でも失敗したら非ゼロ終了する
-# (独立レビュー 2026-10-02)。乖離時はOnFailureでIssue通知される。
-ExecStart=/bin/bash -c 'fail=0; node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812 || fail=1; node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18813 || fail=1; exit $fail'
+# (独立レビュー 2026-10-02)。Staging(18814)は mirai-web-cad-staging.service が設置されて
+# いるホストでのみ検査し、未設置のホストでは失敗させない(ADR-0005)。乖離時はOnFailureでIssue通知される。
+ExecStart=/bin/bash -c 'fail=0; node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812 || fail=1; node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18813 || fail=1; if systemctl cat mirai-web-cad-staging.service >/dev/null 2>&1; then node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18814 || fail=1; fi; exit $fail'
 
 NoNewPrivileges=true
 PrivateTmp=true

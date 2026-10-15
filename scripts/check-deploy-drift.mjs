@@ -11,9 +11,14 @@
 //
 // 使い方:
 //   node scripts/check-deploy-drift.mjs                        # 作業ツリーのみ判定
-//   node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812
+//   node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812   # 本番
+//   node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18813   # MVP
+//   node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18814   # Staging(ADR-0005)
 //   node scripts/check-deploy-drift.mjs --remote               # origin/mainの最新をls-remoteで確認
 //   node scripts/check-deploy-drift.mjs --json
+//
+// 環境(本番/MVP/Staging)ごとに --url を変えて実行する。対象ポートはホストに設置済みの
+// systemd unitに合わせる(Stagingは mirai-web-cad-staging.service が設置されている場合のみ)。
 //
 // 終了コード: 0=一致(またはデプロイ待ち), 1=乖離あり, 2=判定不能
 import { execFileSync } from "node:child_process";

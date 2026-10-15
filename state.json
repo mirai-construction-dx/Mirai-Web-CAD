@@ -8,6 +8,16 @@
     "mvp_url": "https://mirai-web-cad-mvp.mirai-dx-platform.com",
     "mvp_host": "kensan1969 (local PostgreSQL mirai_web_cad_mvp, systemd + Cloudflare Tunnel + Access)",
     "production_host": "kensan1969 (local, systemd + Cloudflare Tunnel)",
+    "staging": {
+      "url": "https://mirai-web-cad-stg.mirai-dx-platform.com",
+      "port": 18814,
+      "host": "kensan1969 (local PostgreSQL mirai_web_cad_staging, systemd + Cloudflare Tunnel + Access)",
+      "service": "mirai-web-cad-staging.service",
+      "db": "mirai_web_cad_staging",
+      "recovery_db": "mirai_web_cad_staging_recovery",
+      "purpose": "本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証する(使い捨てデータ、本番へ昇格しない)",
+      "status": "prepared/not yet provisioned (owner Y/N pending for DNS/Access/secrets/systemd/DB)"
+    },
     "pages_default_url": "https://mirai-web-cad.pages.dev (rollback fallback, not updated on merge)",
     "strategy_doc": "docs/Mirai-Web-CAD_80-90％代替・AI統合開発方針.md(2026-08-30、ユーザーがCTOへ対応・開発・実装を全権委任。現状代替率30-35%評価、土木2Dワークフロー限定で80-90%到達を目標とするPhase 0-5ロードマップ。以後の優先順位判断の最上位参照文書とする)"
   },
@@ -80,7 +90,8 @@
     "P0-52 本番Migration/MVP保全(2026-09-05): 本番DBを事前backup後に0006適用しJSONB strings=0。MVP専用の日次backup、鮮度検査、週次隔離DB復元、15分API/DB/Access境界監視をsystemdで有効化し実機成功",
     "P0-53 ネイティブARC/DXF円弧往復(2026-09-05): arc entity、Canvas/CLI作図、境界/長さ/選択/OSnap、変換/OFFSET/鏡像、FILLET、JSON/DXF入出力、比較器を一貫対応。単体テスト+4件、既存E2EをARC前提へ更新",
     "P0-55 外部入力再棚卸し(2026-09-05): Cloudflare/Entra/DXF/UATの実環境状態を確認し、推測値を投入せずdocs/external-input-status.mdへ不足入力と再開条件を記録",
-    "P0-56 ネイティブELLIPSE/SPLINE・DXF曲線往復(2026-09-05): UI/CLI、Canvas、境界/長さ/楕円面積/選択/OSnap、変形/鏡像、JSON/DXF入出力、比較器を一貫対応"
+    "P0-56 ネイティブELLIPSE/SPLINE・DXF曲線往復(2026-09-05): UI/CLI、Canvas、境界/長さ/楕円面積/選択/OSnap、変形/鏡像、JSON/DXF入出力、比較器を一貫対応",
+    "ADR-0005 Staging環境の設計(2026-10-16承認、CTO全権委譲): 本番/MVPと分離した3系統目`mirai-web-cad-staging`(service=mirai-web-cad-staging.service、port=18814、DB=mirai_web_cad_staging、recovery=mirai_web_cad_staging_recovery)を既存Tunnelへ追加する設計を確定。unit定義・scripts/check-staging-health.sh・deploy-local.shの3系統対応・CI構成検査・文書はPRでマージ。ホスト反映(DNS route/Access Application・Policy/staging.env・staging-backup.env/systemd配置/DBロール作成)はGITHUB_POLICY.md §8のHuman GateとしてオーナーY/N待ち(手順=docs/runbooks/staging-bringup.md)"
   ],
   "blocked_issues": [
     {
@@ -129,5 +140,5 @@
       "Edit/Writeツールへ渡すJSON文字列パラメータ内で`\\u0000`等のUnicodeエスケープをテキストとして書こうとすると、JSON側の文字列デコードにより実際の制御バイトへ変換されてファイルに書き込まれてしまう(意図した`\\u0000`という6文字ではなく、実際のNULバイト1個になる)。正規表現の制御文字クラス(`/[\\u0000-\\u001f]/`等)をソースコードに書く際は、Edit/Writeツールを直接使わず、Pythonでのバイト列置換等でエスケープシーケンスのテキストそのもの(バックスラッシュ+u+16進数4桁)をファイルへ書き込む必要がある。NULバイトが混入するとgrep等がファイルをバイナリ扱いしテキスト検索が効かなくなる副作用もある"
     ]
   },
-  "last_updated": "2026-10-02T09:00:00+09:00"
+  "last_updated": "2026-10-16T09:00:00+09:00"
 }

@@ -1,6 +1,6 @@
 # Cloudflare Terraform
 
-Mirai Web CADの既存Cloudflare Tunnel、2つのCNAME、MVP Access ApplicationをTerraformで管理するための構成です。新規環境の作成用ではなく、**稼働中資源をimportしてから管理へ移す**ことを前提にしています。
+Mirai Web CADの既存Cloudflare Tunnel、本番/MVPの2つのCNAME、MVP Access ApplicationをTerraformで管理するための構成です。加えて[ADR-0005](../../docs/adr/ADR-0005-staging-environment.md)の**Staging環境**(3つ目のCNAMEとAccess Application)を、**未管理(`enable_management=false`)のまま**コード化しています。新規環境の作成用ではなく、**稼働中資源をimportしてから管理へ移す**ことを前提にしています。
 
 ## 管理範囲
 
@@ -8,6 +8,7 @@ Mirai Web CADの既存Cloudflare Tunnel、2つのCNAME、MVP Access Application�
 - `mirai-web-cad.mirai-dx-platform.com`と`mirai-web-cad-mvp.mirai-dx-platform.com`のCNAME
 - MVPホスト全体のAccess Application
 - MVPを`kensan1969@gmail.com`だけに限定するallow policy
+- **未管理**: StagingのCNAME(`mirai-web-cad-stg.mirai-dx-platform.com`)とAccess Application(下記「Staging環境の定義」)
 
 初回importでは既存policyを意図せず更新しないよう、Application側は棚卸ししたpolicy UUIDとprecedenceだけを参照します。policy本文がメール完全一致のallow 1件であることは棚卸し記録と初回planで照合し、差分がある状態ではapplyしません。
 
@@ -48,6 +49,40 @@ terraform -chdir=infra/cloudflare apply change.tfplan
 
 適用後は`docs/runbooks/cloudflare-access-change.md`の検査を実行します。`terraform.tfvars`、state、plan、API tokenはコミットしません。`imports.tf`は条件付きの安全装置としてコード管理します。stateは所有者のみ読める場所へバックアップし、チャット・Issue・CI artifactへ添付しません。
 
+## Staging環境の定義(未管理)
+
+[ADR-0005](../../docs/adr/ADR-0005-staging-environment.md)のStaging(`mirai-web-cad-stg.mirai-dx-platform.com`、origin `http://127.0.0.1:18814`)を、MVPと同じパターンでコード化しています。**稼働中の設定は変更せず、`enable_management=false`を維持**します。
+
+- 追加したもの: Staging CNAME(`local.tunnel_dns_records`の`staging`)、Staging Access Application(`cloudflare_zero_trust_access_application.staging`)、`staging_allowed_email`・`staging_access_application_id`・`staging_access_policy_id`・`staging_dns_record_id`変数、監査用の`staging_access_aud`出力。
+- 既存Tunnel `mirai-web-cad`を再利用し、新しいTunnelは作りません。Tunnel ingress(origin `http://127.0.0.1:18814`)はローカル`~/.cloudflared/mirai-web-cad-config.yml`側で、正本テンプレートは`deploy/cloudflared/mirai-web-cad-config.example.yml`です。Terraformへは入れず、追記はHuman Gateで行います。
+- 許可対象はMVPと同じ`kensan1969@gmail.com`のみ(ホスト全体、bypassなし)。Application側は棚卸ししたpolicy UUIDと`precedence=1`だけを参照し、policy本文は初回importで書き換えません。
+
+### 管理が有効にならない仕組み
+
+- `enable_management`は`false`のままにします。
+- `terraform.tfvars`のStaging IDがプレースホルダ(`0000...`)の間は`local.staging_inventory_ready=false`となり、Staging資源は`count=0`でplan/applyに現れず、Staging CNAMEもルーティング表へ入りません。
+- `enable_management=true`にしても、`local.inventory_ready`(本番/MVP)と`local.staging_inventory_ready`(Staging)の**両方**が真になるまでStaging資源は作られません。
+
+### Stagingのimport-only plan(オーナーのY/N後)
+
+DNS import blockはStaging CNAMEも取り込みます。Staging Access Applicationは`imports.tf`の対象外(CI guardrail `scripts/check-cloudflare-iac.mjs`がimport対象をMVP/本番に固定しているため)なので、オーナーが明示的に`terraform import`します。**applyは行わず**、import-only planが無差分であることだけを確認します。
+
+```bash
+export CLOUDFLARE_API_TOKEN='<scoped token>'
+terraform -chdir=infra/cloudflare init
+terraform -chdir=infra/cloudflare fmt -check
+terraform -chdir=infra/cloudflare validate
+# terraform.tfvarsのStaging IDを記入し、enable_management=trueへ変更してから:
+terraform -chdir=infra/cloudflare import 'cloudflare_zero_trust_access_application.staging[0]' \
+  'accounts/<account_id>/<staging_access_application_id>'
+terraform -chdir=infra/cloudflare plan -out=staging-import.tfplan
+terraform -chdir=infra/cloudflare show staging-import.tfplan
+```
+
+planにcreate/update/destroyが現れる、またはpolicy変更・`everyone`・`email_domain`・`bypass`が出た場合はapplyしません。ホスト反映(DNS route、Access新設、秘密情報、systemd配置、DB/ロール作成)を含むHuman Gateの手順は[Staging構築手順書](../../docs/runbooks/staging-bringup.md)を正とします。
+
 ## 現在の移行状態
 
 コード、guardrail、CI検証は準備済みです。2026-09-05の再棚卸しではtoken verifyは成功しましたが、DNS APIは`403/code 10000`、Access Application APIはHTTP 200でも0件でした。対象account/zoneへ必要権限を付けたtokenと正しいZero Trust accountを確認できないため、実資源のID棚卸し・import・初回plan/applyは未実施です。権限付与後も最初にread-only inventoryを行い、既存設定との差分をレビューしてから管理を有効化します。詳細は[外部入力・確定待ち台帳](../../docs/external-input-status.md)を参照してください。
+
+Stagingの定義(2026-10-16追加)も同じ状態です。コード化のみで、Staging IDは未棚卸しのため`staging_inventory_ready=false`のままです。ホスト反映は、オーナーのY/N後に[Staging構築手順書](../../docs/runbooks/staging-bringup.md)のHuman Gateとして実施します。

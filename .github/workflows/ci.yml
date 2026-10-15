@@ -272,6 +272,31 @@ jobs:
       - name: Validate configuration
         run: terraform -chdir=infra/cloudflare validate
 
+  # Staging構成検査(ADR-0005)。クラウド資格情報・ネットワークを使わず、リポジトリ内の
+  # unit・スクリプトだけを検査する。必須チェックには含めない(Ruleset `central-auto-merge`
+  # のrequired_status_checksは別管理であり、本ジョブの追加では変更しない)。
+  staging-config:
+    name: Staging Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+      # 検査はbashとgrepのみで完結するため、依存パッケージの導入(npm ci)は行わない
+      # (資格情報もネットワークも不要)。
+      - name: 関連シェルスクリプトの構文検査
+        run: |
+          bash -n scripts/check-staging-health.sh
+          bash -n scripts/deploy-local.sh
+          bash -n scripts/check-staging-config.sh
+      # unitの存在・必須ディレクティブ・18814/DB名・本番経路との非配線をまとめて検査する。
+      - name: Staging構成の静的検査
+        run: bash scripts/check-staging-config.sh
+
   preview:
     name: Deploy Preview
     # merge_group(Merge Queue)では配信せず、必須チェック名「Deploy Preview」を成功で報告する。
