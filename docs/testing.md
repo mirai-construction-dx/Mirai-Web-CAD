@@ -32,10 +32,13 @@ E2E_BASE_URL=https://mvp-round-5.mirai-web-cad.pages.dev npm run test:e2e
 E2E_CF_ACCESS_CLIENT_ID=... E2E_CF_ACCESS_CLIENT_SECRET=... npm run test:e2e:staging
 ```
 
-Staging環境(`mirai-web-cad-staging.service`、ポート`18814`、ホスト名`mirai-web-cad-stg.mirai-dx-platform.com`)に対して、desktop/mobileでCanvas描画、`/api/health`の接続DB名`mirai_web_cad_staging`、新規図面、LINE作図、サーバー同期、Cloudflare Access境界を一括で確認します。`scripts/verify-staging-domain.mjs`が実装で、トップレベルURLは`E2E_BASE_URL`で上書きできます(既定はStagingホスト)。環境未整備やDB不一致を検出するため先頭で必要な環境変数を検査します。
+Staging環境(`mirai-web-cad-staging.service`、ポート`18814`、ホスト名`mirai-web-cad-stg.mirai-dx-platform.com`)に対して、desktop/mobileでSPAが表示されCanvasが描画されること、Cloudflare Access境界、`AUTH_MODE=access`でのアプリの拒否境界を確認します。`scripts/verify-staging-domain.mjs`が実装で、トップレベルURLは`E2E_BASE_URL`で上書きできます(既定はStagingホスト)。
 
-- **前提**: Stagingホストが構築済みであること。DNS・Access・秘密情報・systemd・DBの反映は[Staging構築手順書](runbooks/staging-bringup.md)のHuman Gateで、**オーナーのY/N待ち**([ADR-0005](adr/ADR-0005-staging-environment.md) §4)。Y/N前に本コマンドを実行すると接続失敗します。
-- **`test:e2e:mvp`との違い**: Stagingは**リリース候補・migration・デプロイ手順の本番前検証**用で、`AUTH_MODE=access`、専用DB`mirai_web_cad_staging`、本番と同一構成。MVP(`test:e2e:mvp`)は`kensan1969@gmail.com`単一利用者の**機能評価**用で、DBは`mirai_web_cad_mvp`。検証内容(desktop/mobile・Canvas・health・作図・同期・Access境界)は同一で、対象URLと期待DB名のみが Staging 固有です。
+- **前提**: Access Service Tokenをテスト直前に作成し、テスト直後に policy と token の両方を削除します(常設しない)。Accessのpolicy変更は反映に数十秒かかるため、作成後に待ってから実行します(実測: 60秒)。
+- **Service Tokenで検証できる範囲**: `AUTH_MODE=access`ではアプリがAccessのユーザーJWTを検証するため、ユーザーJWTを持たないService Tokenは**エッジ(302)を通過してもアプリがfail-closedで401を返します**(設計どおり)。自動E2Eは「SPA表示・Canvas描画・エッジ/アプリの拒否境界」を検証し、`/api/health`が200のときだけDBプローブ(provider/mode/migrated)も検証します。**書き込み系(新規図面・LINE・同期)は実利用者としてログインした対話セッションで検証します**。
+- **接続DB名の検証**: `/api/health`は公開用に`{provider, mode, migrated}`のみを返し`database`を含めないため、E2Eでは検証しません。接続DB名は`scripts/check-staging-readiness.sh`(psqlの`current_database()`)と各unitの`EXPECTED_DATABASE`で検証します。
+- **`test:e2e:mvp`との違い**: Stagingは**リリース候補・migration・デプロイ手順の本番前検証**用で、`AUTH_MODE=access`、専用DB`mirai_web_cad_staging`、本番と同一構成。MVPは`kensan1969@gmail.com`単一利用者の**機能評価**用で、DBは`mirai_web_cad_mvp`。検証ロジックは同一で、対象URLのみが異なります。
+- **既知の修正(2026-10-16)**: 旧実装は`/api/health`の`db.database`を期待していましたが、APIは`database`を返さないため**常に失敗**していました(`test:e2e:mvp`も同様)。現在は上記の範囲を正しく検証します。
 
 ## 2026-08-26 本ラウンド証跡
 
