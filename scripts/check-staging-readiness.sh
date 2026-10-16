@@ -164,7 +164,9 @@ if [[ -n "$health_json" ]]; then
   else
     fail_item "ok=trueではありません(status=degraded/503の可能性)"
   fi
-  db_json="$(printf '%s' "$health_json" | grep -oE '"db"[[:space:]]*:[[:space:]]*\{[^}]*\}' | head -n 1 || true)"
+  # healthは整形済み(複数行)JSONで返るため、改行を除去してから部分一致で取り出す(改善: 複数行JSONでdb.modeを取り違えない)。
+  health_flat="$(printf '%s' "$health_json" | tr -d '\n')"
+  db_json="$(printf '%s' "$health_flat" | grep -oE '"db"[[:space:]]*:[[:space:]]*\{[^}]*\}' | head -n 1 || true)"
   db_mode="$(printf '%s' "$db_json" | grep -oE '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   db_name_health="$(printf '%s' "$db_json" | grep -oE '"database"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   if [[ "$db_mode" == "connected" ]]; then
