@@ -49,6 +49,6 @@
     "eslint": "^10.11.0",
     "hcl2-parser": "^1.0.3",
     "typescript": "^7.0.2",
-    "wrangler": "^4.144.0"
+    "wrangler": "^4.151.0"
   }
 }
