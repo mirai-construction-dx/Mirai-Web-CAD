@@ -13,6 +13,7 @@
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
     "test:e2e:mvp": "node scripts/verify-mvp-domain.mjs",
+    "test:e2e:staging": "node scripts/verify-staging-domain.mjs",
     "db:verify": "bash scripts/verify-database.sh",
     "db:check": "bash scripts/check-database-state.sh",
     "db:backup": "bash scripts/backup-database.sh",

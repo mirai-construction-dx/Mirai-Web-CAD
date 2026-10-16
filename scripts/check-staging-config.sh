@@ -7,6 +7,8 @@
 #   (c) 各unitが必須ディレクティブ(staging env・PORT/LOCAL_URL・OnFailure 等)を持つこと
 #   (d) deploy-local.shがstaging(18814)へ対応し、DB名が定義側で一致していること
 #   (e) stagingが本番専用の経路へ配線されていないこと
+#   (f) 構築後/構築中の繰り返し検証ツール(check-staging-readiness.sh・verify-staging-domain.mjs・
+#       test:e2e:staging)がリポジトリ内に存在し、空でないこと
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -130,6 +132,14 @@ done
 require_absent deploy/systemd/mirai-web-cad-offsite-backup.service 'staging' 'Stagingのオフサイト転送への組み込み'
 # 5. 本番サービスunitはstagingを参照しない。
 require_absent deploy/systemd/mirai-web-cad.service 'staging' '本番サービスunitからのStaging参照'
+
+# (f) 構築後/構築中の繰り返し検証ツールがリポジトリ内に存在し、空でないこと。
+# Readinessチェッカーと公開URL E2Eは、ホスト反映後の疎通確認で使う(staging-bringup.md §12)。
+for f in scripts/check-staging-readiness.sh scripts/verify-staging-domain.mjs; do
+  [[ -s "$f" ]] || fail_msg "検証ツールが存在しないか空です: $f"
+done
+# 公開URL E2Eをnpmスクリプトから実行できること。
+require_line package.json 'test:e2e:staging' 'test:e2e:staging スクリプト'
 
 if [[ "$fail" -ne 0 ]]; then
   echo "Staging構成検査: 失敗があります。" >&2

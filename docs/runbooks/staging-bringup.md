@@ -330,3 +330,23 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 - Stagingからの本番データ参照は行わない。実データ形状が必要な場合は`seeds/demo.sql`または合成データを使う
 - 本番・MVPのDNS/Access/Ruleset設定を変更しない。Terraformの`enable_management`は`false`を維持し、import planが無差分になるまでapplyしない
 - Stagingのバックアップ保持期間は14日。オフサイト転送（R2）の対象には当面含めない（本番・MVPのみ）
+
+## 12. 構築後の繰り返し検証（ReadinessチェックとStaging E2E）
+
+Human Gate 1〜7を進める前後で、次の2つを何度でも繰り返し実行します。いずれも読み取り専用で、ホストの設定を変更しません。構築完了後だけでなく、途中で「どこまで済んだか」を確認する用途にも使います。
+
+| コマンド | 用途 | 期待結果 |
+| --- | --- | --- |
+| `bash scripts/check-staging-readiness.sh` | ホストの現状（ユニットの設置・enable・active、envファイルの存在と`0600`、アプリDB/隔離DBの存在、ローカルhealth（18814）、公開URLのAccess境界、`deploy-local.sh`のStaging対応）を項目ごとに`[OK]`/`[FAIL]`で報告する | 未構築の間は「Staging環境は未構築です」を表示して**exit 0**。構築を始めた後に必須項目が欠けている場合だけ**exit 1** |
+| `E2E_CF_ACCESS_CLIENT_ID=... E2E_CF_ACCESS_CLIENT_SECRET=... npm run test:e2e:staging` | Access Service TokenでStaging公開URLを認証し、desktop/mobileの主要画面を検証する | 全ケース成功でexit 0 |
+
+`scripts/check-staging-readiness.sh`は秘密値を出力しません。envファイルの確認もキー名（`grep -o '^[A-Z_]*='`）だけを表示し、値は画面に出しません。接続先は環境ファイルを`source`せず、`deploy-local.sh`と同じく`sed`で必要な1変数だけを取り出します。
+
+### Access Service Tokenを使うE2Eの手順（テスト時のみ）
+
+`npm run test:e2e:staging`は、Cloudflare AccessのService TokenでStaging公開URLを認証してE2Eを実行します（ローカルURLではなく公開URLを通すため、Access境界そのものを検証できます）。Service Tokenは**テストのためだけ**に作成し、テスト直後にpolicyとtokenの両方を削除します。**通常利用のAccess policyへService Tokenを残してはいけません**（手順4のbypass policyを引き継がないのと同じ方針）。
+
+1. テスト直前に、Staging Applicationへテスト専用の`service_auth` policyを追加し、Service Tokenを発行する
+2. `E2E_CF_ACCESS_CLIENT_ID`・`E2E_CF_ACCESS_CLIENT_SECRET`へ発行値を渡して`npm run test:e2e:staging`を実行する（値はGit・ログ・チャットへ出さない）
+3. テスト直後に、追加した`service_auth` policyとService Tokenを削除する
+4. Staging Applicationの通常policyが`allow`かつ`Emails = kensan1969@gmail.com`のみに戻っていることを確認する
