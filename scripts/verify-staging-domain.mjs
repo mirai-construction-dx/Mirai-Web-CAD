@@ -41,14 +41,23 @@ try {
 
     const health = await page.evaluate(async () => {
       const response = await fetch("/api/health");
-      return { status: response.status, body: await response.json() };
+      return { status: response.status, body: await response.json().catch(() => null) };
     });
-    if (health.status !== 200 || health.body?.db?.database !== "mirai_web_cad_staging" || health.body?.db?.migrated !== true) {
+    // AUTH_MODE=accessでは実利用者のAccess JWTがある場合だけAPIを利用できる。Access Service Tokenは
+    // エッジ(302の壁)を通過してもユーザーJWTを持たないため、アプリは fail-closed で401を返す(想定どおり)。
+    // 200のときだけDBプローブを検証し、401は「正しく拒否している」証跡として記録する。
+    // 接続DB名の一致は check-staging-readiness.sh(psql) と unit の EXPECTED_DATABASE で検証する。
+    if (health.status !== 200 && health.status !== 401) {
+      throw new Error(`${target.name}: /api/health が想定外のステータスです(status=${health.status})`);
+    }
+    const apiAccessible = health.status === 200;
+    const dbProbe = health.body?.db;
+    if (apiAccessible && (dbProbe?.provider !== "postgres" || dbProbe?.mode !== "connected" || dbProbe?.migrated !== true)) {
       throw new Error(`${target.name}: Staging DB healthが不正です。`);
     }
 
     let drawingName = null;
-    if (target.edit) {
+    if (target.edit && apiAccessible) {
       drawingName = `Cloudflare Staging E2E ${Date.now()}`;
       await page.getByRole("button", { name: "新規図面" }).click();
       const dialog = page.getByRole("dialog", { name: "新規図面" });
@@ -65,7 +74,7 @@ try {
       await waitForText(page.locator(".save-status"), "サーバー同期済み", "desktop: server sync");
     }
 
-    results.push({ target: target.name, paintedPixels, database: health.body.db.database, drawingName });
+    results.push({ target: target.name, paintedPixels, apiStatus: health.status, apiAccessible, dbProvider: dbProbe?.provider ?? null, dbMode: dbProbe?.mode ?? null, drawingName });
     await context.close();
   }
 } finally {
