@@ -35,3 +35,6 @@ DXF-Test-Corpus/00_manifest/corpus_manifest.*
 DXF-Test-Corpus/00_manifest/verification.json
 DXF-Test-Corpus/.write_test
 DXF-Test-Corpus/**/.write_test
+
+# AIエージェントのツール状態(製品の一部ではない)
+.omo/
