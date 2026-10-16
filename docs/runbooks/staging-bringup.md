@@ -243,6 +243,16 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/staging.env
 
 ユニット定義を`/etc/systemd/system/`へ配置し、サービスとタイマーを有効化します。失敗通知は既存の`mirai-web-cad-notify-failure@.service`（H-3で導入済み）へ`OnFailure=`で接続します。
 
+> [!IMPORTANT]
+> バックアップユニットは`ReadWritePaths=/var/backups/mirai-web-cad/staging-postgres`を持つため、**この**ディレクトリを**先に作成**してください。未作成のまま有効化すると、systemdのマウント名前空間設定に失敗し`status=226/NAMESPACE`で失敗します（2026-10-16実測）。MVPと同じ所有者・権限にします。
+>
+> ```bash
+> sudo install -d -o kensan -g kensan -m 0700 /var/backups/mirai-web-cad/staging-postgres
+> ```
+
+> [!NOTE]
+> 監視（`mirai-web-cad-staging-monitor.service`）は`WorkingDirectory`の作業ツリーにある`scripts/check-staging-health.sh`を実行します。このスクリプトはmainにのみ存在するため、**作業ツリーが本番反映（`scripts/deploy-local.sh`）で対象commitへ更新されるまで監視は失敗します**（2026-10-16実測: ツリーがmainより13コミット遅れで`exit 127`）。サービス本体（`scripts/serve-production.mjs`）は旧ツリーでも動作します。
+
 **コマンド**
 
 ```bash
