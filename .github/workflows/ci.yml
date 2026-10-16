@@ -293,6 +293,7 @@ jobs:
           bash -n scripts/check-staging-health.sh
           bash -n scripts/deploy-local.sh
           bash -n scripts/check-staging-config.sh
+          bash -n scripts/check-staging-readiness.sh
       # unitの存在・必須ディレクティブ・18814/DB名・本番経路との非配線をまとめて検査する。
       - name: Staging構成の静的検査
         run: bash scripts/check-staging-config.sh
