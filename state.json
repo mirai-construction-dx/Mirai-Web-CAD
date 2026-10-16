@@ -16,7 +16,7 @@
       "db": "mirai_web_cad_staging",
       "recovery_db": "mirai_web_cad_staging_recovery",
       "purpose": "本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証する(使い捨てデータ、本番へ昇格しない)",
-      "status": "prepared/not yet provisioned (owner Y/N pending for DNS/Access/secrets/systemd/DB)"
+      "status": "cloudflare provisioned 2026-10-16 (owner-authorized: DNS CNAME + Access application/policy + tunnel ingress). Origin not deployed: staging.env/staging-backup.env, staging DB/roles, systemd unit, backup/restore drill still owner Y/N pending, so staging is not yet usable"
     },
     "pages_default_url": "https://mirai-web-cad.pages.dev (rollback fallback, not updated on merge)",
     "strategy_doc": "docs/Mirai-Web-CAD_80-90％代替・AI統合開発方針.md(2026-08-30、ユーザーがCTOへ対応・開発・実装を全権委任。現状代替率30-35%評価、土木2Dワークフロー限定で80-90%到達を目標とするPhase 0-5ロードマップ。以後の優先順位判断の最上位参照文書とする)"
@@ -92,7 +92,8 @@
     "P0-55 外部入力再棚卸し(2026-09-05): Cloudflare/Entra/DXF/UATの実環境状態を確認し、推測値を投入せずdocs/external-input-status.mdへ不足入力と再開条件を記録",
     "P0-56 ネイティブELLIPSE/SPLINE・DXF曲線往復(2026-09-05): UI/CLI、Canvas、境界/長さ/楕円面積/選択/OSnap、変形/鏡像、JSON/DXF入出力、比較器を一貫対応",
     "ADR-0005 Staging環境の設計(2026-10-16承認、CTO全権委譲): 本番/MVPと分離した3系統目`mirai-web-cad-staging`(service=mirai-web-cad-staging.service、port=18814、DB=mirai_web_cad_staging、recovery=mirai_web_cad_staging_recovery)を既存Tunnelへ追加する設計を確定。unit定義・scripts/check-staging-health.sh・deploy-local.shの3系統対応・CI構成検査・文書はPRでマージ。ホスト反映(DNS route/Access Application・Policy/staging.env・staging-backup.env/systemd配置/DBロール作成)はGITHUB_POLICY.md §8のHuman GateとしてオーナーY/N待ち(手順=docs/runbooks/staging-bringup.md)",
-    "Staging検証ツール整備(2026-10-16、ADR-0005): scripts/check-staging-readiness.sh(読み取り専用のReadinessチェッカー。systemd unit・env 0600(キー名のみ表示)・DB存在・18814のhealth・公開URLのAccess境界・deploy-local.sh対応を項目別に報告し、未構築時はexit 0、構築開始後の必須項目欠落はexit 1。秘密値は非出力)を追加。scripts/check-staging-config.shへcheck-staging-readiness.sh/verify-staging-domain.mjs/test:e2e:stagingの存在検査を追加し、CIジョブ「Staging Configuration」の構文検査へ配線。npm run test:e2e:staging(scripts/verify-staging-domain.mjs)で公開URLをAccess Service Token経由で検証する。ホスト反映はオーナーY/N待ち"
+    "Staging検証ツール整備(2026-10-16、ADR-0005): scripts/check-staging-readiness.sh(読み取り専用のReadinessチェッカー。systemd unit・env 0600(キー名のみ表示)・DB存在・18814のhealth・公開URLのAccess境界・deploy-local.sh対応を項目別に報告し、未構築時はexit 0、構築開始後の必須項目欠落はexit 1。秘密値は非出力)を追加。scripts/check-staging-config.shへcheck-staging-readiness.sh/verify-staging-domain.mjs/test:e2e:stagingの存在検査を追加し、CIジョブ「Staging Configuration」の構文検査へ配線。npm run test:e2e:staging(scripts/verify-staging-domain.mjs)で公開URLをAccess Service Token経由で検証する。ホスト反映はオーナーY/N待ち",
+    "Staging Cloudflare資源のプロビジョニング(2026-10-16、オーナーがCTOへ自動化をY委譲): 既存Tunnel mirai-web-cad(id f8c9fb57-fb21-4a24-b1be-f7dd5699badc、status healthy)へmirai-web-cad-stg.mirai-dx-platform.comのCNAME(id 1ce6a00f970aa00c1b152d33bebec2a8、account 4f1e888469df7e0b896bb4e211b12633、zone e375e651e49a40801a305b89e297bff0)を追加し、Staging Access Application(id 552bd803-cd79-4376-a388-278917378955、aud 826bd6bc9d3b8e74214dbcd09376c0e803092e272db1d9ce4e8190d98d6302bf、self_hosted・session 24h)とallow policy(id 6a4e42ff-8133-4225-ad80-d2ca654a8d75、kensan1969@gmail.comのみ・decision allow)を新設。~/.cloudflared/mirai-web-cad-config.yml(ホスト設定)へmirai-web-cad-stg.mirai-dx-platform.com→http://localhost:18814のingress行を追加(backup: mirai-web-cad-config.yml.bak-20261016T093601)し、mirai-web-cad-cloudflared.serviceを2026-10-16 09:38 JSTに再起動(4コネクタ再登録)。実測: 公開URLと/api/healthは302でAccessログイン(bypassなし)、本番/MVPは不変。追加は可逆(DNS 1件・Access app/policy 1組・ingress 1行)。staging.env/DB/systemd配置/復元ドリルは未実施のためStagingは未利用"
   ],
   "blocked_issues": [
     {
@@ -141,5 +142,5 @@
       "Edit/Writeツールへ渡すJSON文字列パラメータ内で`\\u0000`等のUnicodeエスケープをテキストとして書こうとすると、JSON側の文字列デコードにより実際の制御バイトへ変換されてファイルに書き込まれてしまう(意図した`\\u0000`という6文字ではなく、実際のNULバイト1個になる)。正規表現の制御文字クラス(`/[\\u0000-\\u001f]/`等)をソースコードに書く際は、Edit/Writeツールを直接使わず、Pythonでのバイト列置換等でエスケープシーケンスのテキストそのもの(バックスラッシュ+u+16進数4桁)をファイルへ書き込む必要がある。NULバイトが混入するとgrep等がファイルをバイナリ扱いしテキスト検索が効かなくなる副作用もある"
     ]
   },
-  "last_updated": "2026-10-16T12:00:00+09:00"
+  "last_updated": "2026-10-16T13:00:00+09:00"
 }

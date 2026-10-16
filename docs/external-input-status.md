@@ -1,21 +1,28 @@
 # 外部入力・確定待ち台帳
 
-更新日: 2026-09-25
+更新日: 2026-10-16
 
 コードだけでは確定できない運用情報を、推測値で埋めないための台帳です。秘密値、個人の電話番号、実案件名、図面本体はGitへ保存しません。
 
 ## 1. Cloudflare Terraform移管
 
-| 確認項目 | 2026-09-05の実測 | 次に必要な入力 |
-| --- | --- | --- |
-| API token自体 | `/user/tokens/verify`はHTTP 200 | なし |
-| Access Application一覧 | 対象accountへのAPIはHTTP 200だが0件 | 正しいZero Trust accountの確認、または対象accountへ`Access Apps and Policies Read/Write`を付けたtoken |
-| MVP/本番DNS | 対象zoneのDNS APIはHTTP 403(code 10000) | 対象zone限定の`DNS Read/Write` |
-| Tunnel | 既知のTunnel IDはテンプレートへ記録済み | 対象account限定の`Cloudflare Tunnel Read/Write` |
-| `terraform.tfvars` | 未作成。IDを推測していない | Application、policy、MVP DNS、本番DNSの実ID |
-| import/plan/apply | 未実施 | 上記IDを棚卸し後、import-only planが無差分であること |
+2026-10-16に、オーナーがCloudflare自動化(CTO)をY委譲しました。Web-CAD自身の資源(account・zone・Tunnel・本番/MVP/StagingのDNSとAccess)のread-only棚卸しは完了し、実IDを下表と`terraform.tfvars`(Git管理外、ローカル作成)へ記録しました。共通基盤側を含む一般的なimport/applyは引き続き未実施です。移行設計と手順は[Cloudflare Terraform手順](../infra/cloudflare/README.md)を参照してください。
 
-権限追加後は[Cloudflare Terraform手順](../infra/cloudflare/README.md)の順にread-only棚卸しをやり直します。Access policyにメール完全一致1件以外の差分、DNS/Tunnelの置換、`everyone`/`bypass`が出た場合はapplyしません。
+| 確認項目 | 2026-10-16の実測 | 次に必要な入力 |
+| --- | --- | --- |
+| API token自体 | 対象account/zoneへのread-only棚卸しが成功(旧`403/code 10000`は解消) | なし |
+| account / zone | account `4f1e888469df7e0b896bb4e211b12633`("Kensan1969@gmail.com's Account")、zone `mirai-dx-platform.com` = `e375e651e49a40801a305b89e297bff0` | なし(Web-CAD分は棚卸し完了) |
+| Tunnel | `mirai-web-cad` = `f8c9fb57-fb21-4a24-b1be-f7dd5699badc`(status healthy) | なし |
+| 本番DNS | CNAME `mirai-web-cad.mirai-dx-platform.com` = `8db3c9fbe3c71daf42e86786849b157a`(→`f8c9fb57-...cfargotunnel.com`、proxied) | なし |
+| MVP DNS | CNAME `mirai-web-cad-mvp.mirai-dx-platform.com` = `7651bc461b8c7f7c7dc7d8789115539c`(→同じTunnel) | なし |
+| Staging DNS | CNAME `mirai-web-cad-stg.mirai-dx-platform.com` = `1ce6a00f970aa00c1b152d33bebec2a8`(→同じTunnel、2026-10-16作成) | なし |
+| MVP Access | Application `mirai-web-cad-mvp` = `434a047a-4277-4423-8b91-eed6d7989116`(aud `0c1341f13d88180c1ae1cfaca70b175891c1b72b373567c51cab8e29ba7ce64c`、session 24h)、allow policy `allow-kensan-only` = `44230a75-b7b2-454c-a454-35b2afd2a26e`(decision allow、include email `kensan1969@gmail.com`、precedence 1) | なし |
+| Staging Access | Application `mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`(aud `826bd6bc9d3b8e74214dbcd09376c0e803092e272db1d9ce4e8190d98d6302bf`、self_hosted、session 24h、http_only_cookie_attribute true、app_launcher_visible false、auto_redirect_to_identity false、options_preflight_bypass true)、allow policy `allow-kensan-only` = `6a4e42ff-8133-4225-ad80-d2ca654a8d75`(decision allow、include email `kensan1969@gmail.com`、precedence 1、exclude/requireなし) | なし |
+| 本番専用Access(不変) | `mirai-web-cad-api` = `e0ac286f-412e-4ae4-a969-8befeb7a0b56`、`mirai-web-cad-demo-bypass` = `d03ef7a8-9507-410b-b43c-1a0387b49bde`、`mirai-web-cad-health-bypass` = `89e00d5d-40ff-4c57-98d3-65a2f215656e` | なし |
+| `terraform.tfvars` | 未コミット(ローカル作成、Git管理外)。上記の実IDを記載 | 共通基盤側のID確認(必要な範囲で) |
+| import/plan/apply | 未実施(`enable_management=false`を維持) | 上記IDを用いたimport-only planが無差分であること |
+
+[Cloudflare Terraform手順](../infra/cloudflare/README.md)の順にread-only棚卸しを実施しました。Access policyにメール完全一致1件以外の差分、DNS/Tunnelの置換、`everyone`/`bypass`が出た場合はapplyしません。
 
 ## 2. Entra ID・運用体制
 
@@ -86,7 +93,7 @@
 
 ## 再開条件
 
-- Cloudflare: 上記3権限を対象account/zoneだけに付けたtokenが現在のシェルへ投入済み
+- Cloudflare: Web-CAD自身の資源(account/zone/Tunnel/DNS/Access)のread-only棚卸しは完了(2026-10-16、オーナーY委譲)。実IDは`terraform.tfvars`(Git管理外)へ記録済み。共通基盤側を含む一般のimport-only plan/applyは引き続き未実施で、`enable_management=false`を維持する
 - Entra: tenant内の対象UPN、グループGUID対応、Secret運用責任者、当番/SLA台帳の参照IDが確定
 - Phase 0: 許諾済みDXFの保管場所とUAT参加者台帳の参照IDが確定
 - 基盤整合: 8件とも決定済み(2026-09-25)。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7の契機の到来を追跡する

@@ -12,4 +12,7 @@ ingress:
     service: http://localhost:18813
   - hostname: mirai-web-cad.mirai-dx-platform.com
     service: http://localhost:18812
+  # Staging(ADR-0005)。ホスト全体をCloudflare Accessで保護し、専用DBへ接続する。
+  - hostname: mirai-web-cad-stg.mirai-dx-platform.com
+    service: http://localhost:18814
   - service: http_status:404
