@@ -1,6 +1,6 @@
 # ローカルデプロイ運用メモ
 
-2026-08-30に、本番の永続化先をNeon PostgreSQLからローカルPostgreSQL + Cloudflare Tunnelへ移行済み(Issue #22、ユーザー指示による。移行完了としてclose)。2026-09-05には、本番とデータを分離したMVP URLを同じTunnelへ追加した。2026-10-16には、本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証するStaging環境の設計を[ADR-0005](adr/ADR-0005-staging-environment.md)で確定した(ホストへのDNS/Access/秘密情報/systemd/DBの反映はオーナーY/N待ち。手順は[Staging構築手順書](runbooks/staging-bringup.md))。この文書は日常運用手順、およびセットアップ手順の記録(再構築・障害復旧時の参考)を兼ねる。移行の背景・設計判断は`docs/operations.md`の該当節を参照。
+2026-08-30に、本番の永続化先をNeon PostgreSQLからローカルPostgreSQL + Cloudflare Tunnelへ移行済み(Issue #22、ユーザー指示による。移行完了としてclose)。2026-09-05には、本番とデータを分離したMVP URLを同じTunnelへ追加した。2026-10-16には、本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証するStaging環境の設計を[ADR-0005](adr/ADR-0005-staging-environment.md)で確定し、同日にオーナーのY委譲のもとCloudflare資源(DNS CNAME・Tunnel ingress・Access Application/Policy)をプロビジョニングした(秘密情報/systemd/DBはオーナーY/N待ち。手順は[Staging構築手順書](runbooks/staging-bringup.md))。この文書は日常運用手順、およびセットアップ手順の記録(再構築・障害復旧時の参考)を兼ねる。移行の背景・設計判断は`docs/operations.md`の該当節を参照。
 
 ## 構成
 
@@ -15,7 +15,7 @@ Cloudflare Tunnel(mirai-web-cad-cloudflared.service)
   → http://127.0.0.1:18812 (mirai-web-cad.service, scripts/serve-production.mjs)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad, role=mirai_web_cad_app)
 
-Cloudflare Tunnel(mirai-web-cad-cloudflared.service)   # 未構築(オーナーY/N待ち)
+Cloudflare Tunnel(mirai-web-cad-cloudflared.service)   # DNS/Access公開済み・オリジン未構築(2026-10-16)
   → mirai-web-cad-stg.mirai-dx-platform.com
   → http://127.0.0.1:18814 (mirai-web-cad-staging.service)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad_staging)
@@ -61,12 +61,12 @@ create database mirai_web_cad_mvp_recovery owner mirai_web_cad_backup;
 
 公開URLの自動確認には`npm run test:e2e:mvp`を使う。PC/スマホ表示、Canvas描画、health、接続DB名、新規図面、LINE作図、サーバー同期を確認する。自動テスト用Access Service Tokenはテスト時だけ作成し、テスト直後にpolicyとtokenの両方を削除する。通常利用のAccess policyへService Tokenを残してはいけない。
 
-### Staging環境(設計確定・ホスト未反映)
+### Staging環境(DNS/Access公開済み・オリジン未構築)
 
 - 目的: 本番と同一構成で、リリース候補commitの受入確認、migration適用後状態の確認、`scripts/deploy-local.sh`変更のリハーサル、Cloudflare Access境界の非破壊確認を行う。MVP(機能の操作確認・評価)とは目的が異なり、**Stagingから本番へデータを昇格させない**(昇格するのはコードと設定のみ)。設計は[ADR-0005](adr/ADR-0005-staging-environment.md)を参照
-- URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`(未公開)
-- Access: ホスト全体をCloudflare IdPで保護し、`kensan1969@gmail.com`だけをallow(bypass policyは作らない)
-- Origin: `127.0.0.1:18814` (`mirai-web-cad-staging.service`)
+- URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`(DNS CNAMEとAccessは2026-10-16に公開済み。オリジンが未構築のため未提供で、未認証アクセスは302でAccessログインへ遷移する)
+- Access(**2026-10-16に新設済み**): ホスト全体をCloudflare IdPで保護し、`kensan1969@gmail.com`だけをallow(bypass policyは作らない)。Application `mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`、allow policy `6a4e42ff-8133-4225-ad80-d2ca654a8d75`
+- Origin: `127.0.0.1:18814` (`mirai-web-cad-staging.service`、**未構築のため未起動**)
 - DB: ローカルPostgreSQLの`mirai_web_cad_staging`。本番DB`mirai_web_cad`・MVP DB`mirai_web_cad_mvp`とは分離
 - 秘密値: `~/.config/mirai-web-cad/staging.env` (mode 0600、Git管理外)
 - Backup: `mirai-web-cad-staging-backup.timer`が専用DBを`/var/backups/mirai-web-cad/staging-postgres/`へ日次保存(毎日03:50 JST、保持14日)。`mirai-web-cad-staging-backup-check.timer`が鮮度(36時間以内・0バイト超)を毎日06:45 JSTに検査
@@ -77,7 +77,7 @@ create database mirai_web_cad_mvp_recovery owner mirai_web_cad_backup;
 `staging.env`は`production.env`と同じ必須項目を持つ。`DATABASE_URL`のDB名、`CF_ACCESS_AUD`、`CORS_ORIGIN`をStaging専用値にし、`ACCESS_ROLE_MAP`は許可メール1件だけにする。バックアップと復元ドリルは、アプリ用envとは分離した`~/.config/mirai-web-cad/staging-backup.env`を使う。変数名はMVPの`mvp.env`/`mvp-backup.env`と同じで、DB名だけをStagingへ置き換える。オフサイト転送(R2)の対象には当面含めず、保持期間は14日とする。
 
 > [!IMPORTANT]
-> Stagingのホスト反映(DNS route、Access Application/Policy、`staging.env`・`staging-backup.env`、systemdユニット配置、DB/ロール作成)は、[GITHUB_POLICY.md](../GITHUB_POLICY.md) §8および[AGENTS.md](../AGENTS.md) §4のHuman Gateとして、**オーナーのY/N待ちで未実施**です。手順・コマンド・ロールバック・検証チェックリストは[Staging構築手順書](runbooks/staging-bringup.md)にまとめています。`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替え、Stagingユニット未設置の間は当該環境を対象外とします。
+> Stagingの**Cloudflare資源(DNS CNAME、Tunnel ingress、Access Application/Policy)は2026-10-16にオーナーのY委譲のもとでプロビジョニング済み**です。一方、**`staging.env`・`staging-backup.env`(秘密情報)、systemdユニット配置、DB/ロール作成、復元ドリル、最終検証**は、[GITHUB_POLICY.md](../GITHUB_POLICY.md) §8および[AGENTS.md](../AGENTS.md) §4のHuman Gateとして**オーナーのY/N待ちで未実施**で、オリジンが無いため**Stagingはまだ利用できません**。手順・コマンド・ロールバック・検証チェックリストは[Staging構築手順書](runbooks/staging-bringup.md)にまとめています。`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替え、Stagingユニット未設置の間は当該環境を対象外とします。
 
 ### 1. DB/ロール作成(実施済み)
 
@@ -208,7 +208,7 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替える。Stagingは`mirai-web-cad-staging.service`が設置されている場合だけ切替対象となり、未設置の間は本番・MVPの2系統のみを切り替える(ホスト未反映の間も稼働中ツリーは何も変わらない)。
+`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替える。Stagingは`mirai-web-cad-staging.service`が設置されている場合だけ切替対象となり、未設置の間は本番・MVPの2系統のみを切り替える(Stagingユニット未設置の間も稼働中ツリーは何も変わらない)。
 
 2026-09-25〜(独立レビュー H-1)、次の順で行う。本番・MVP・Stagingは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
 

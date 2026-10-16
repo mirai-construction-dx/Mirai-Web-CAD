@@ -11,7 +11,7 @@
 - systemdユニットの配置・enable
 
 > [!IMPORTANT]
-> 本手順書の作成時点で、**ホストへの反映は1つも実施していません**。DNS・Access・秘密情報・systemd配置・DBはいずれも未作成で、Stagingはまだ利用できません。各Human GateのY/Nを得た後に、上から順に実施してください。
+> 2026-10-16にオーナーがCTOへCloudflare自動化をY委譲し、**Human Gate 1（Stagingホスト名のDNS route＋Tunnel ingress）**と**Human Gate 2（Access Application/Policy）**を実施済みです。ただし**秘密情報（`staging.env`・`staging-backup.env`）・DB・systemd配置・復元ドリル・最終検証（Gate 3〜7）は未実施**で、**Stagingはまだ利用できません**（オリジンが未起動）。残りのGateはY/Nを得た後に、上から順に実施してください。
 
 対象サービスの固定値は次のとおりです。本書と[ローカルデプロイ運用メモ](../deployment-local.md)・[運用・復旧メモ](../operations.md)で同じ値を使います。
 
@@ -57,20 +57,29 @@ Y/Nは各ステップの実行前に個別に取得します。前のステッ�
 | 6 | 復元ドリルの初回実行 | なし（隔離DB内で完結） | なし |
 | 7 | 公開URLのAccess境界確認 | なし | 1・2のロールバックに同じ |
 
+> [!NOTE]
+> **実施状況（2026-10-16）:** Human Gate 1・2は実施済み（オーナーがCTOへ自動化をY委譲）。作成された実IDと検証結果は§3・§4に記載しています。Gate 3（env）・4（DB）・5（systemd）・6（復元ドリル）・7（公開URL検証）は未実施のため、**Stagingはまだ利用できません**。
+
 > [!WARNING]
 > 秘密値・資格情報・接続文字列は**Git・ログ・チャットへ一切出さないでください**。値の存在確認は`grep -o '^KEY='`のようにキー名だけを出力し、値は画面へ出しません（[AGENTS.md](../../AGENTS.md) §4、`state.json`のlearning参照）。
 
-## 3. Human Gate 1: DNS route作成とTunnel ingress追加
+## 3. Human Gate 1: DNS route作成とTunnel ingress追加【実施済み 2026-10-16】
 
 既存Tunnel`mirai-web-cad`にStagingホスト名を追加します。新しいTunnelは作りません。
 
 **コマンド**
 
 ```bash
-cloudflared tunnel route dns mirai-web-cad mirai-web-cad-stg.mirai-dx-platform.com
+cloudflared tunnel route dns f8c9fb57-fb21-4a24-b1be-f7dd5699badc mirai-web-cad-stg.mirai-dx-platform.com
 ```
 
-続けて、Tunnel ingress設定（`~/.cloudflared/mirai-web-cad-config.yml`、リポジトリ外のホスト設定）へStagingのingress行を追加し、Cloudflare Tunnelを再読込します。ingressはホスト名とオリジンの対応を定義するもので、`http://127.0.0.1:18814`を指します。
+> [!WARNING]
+> `cloudflared tunnel route dns`の第1引数には**トンネル名ではなくトンネルUUID**を渡してください。cloudflared 2026.7.3ではトンネル名`mirai-web-cad`を渡すと**別のTunnel（`onegate`、id `a423aa88-91ee-4f5a-b923-640ef448048a`）へ誤って解決**しました（2026-10-16実測）。誤って別Tunnelを向いたCNAMEはAPIで`f8c9fb57-...cfargotunnel.com`へ訂正しています。実行後は必ずCNAMEの向き先が正しいTunnelのUUIDであることを確認してください。
+
+続けて、Tunnel ingress設定（`~/.cloudflared/mirai-web-cad-config.yml`、リポジトリ外のホスト設定）へStagingのingress行を追加します。ingressはホスト名とオリジンの対応を定義するもので、`http://127.0.0.1:18814`を指します。
+
+> [!NOTE]
+> ローカル管理のTunnelはingress設定を**自動再読込しません**。Cloudflareの推奨どおりサービスを再起動してください（またはreplica運用にする）。**この再起動は本番・MVPと共用するTunnelを短時間中断します**（2026-10-16実測: 再起動後、4コネクタが再登録）。
 
 ```bash
 # ingress行を追加した後
@@ -84,14 +93,22 @@ cloudflared tunnel info mirai-web-cad
 - `cloudflared tunnel route dns`がCNAMEレコードを作成する
 - `cloudflared tunnel ingress validate`が成功する
 - `cloudflared tunnel info mirai-web-cad`でコネクタ登録が維持されている
-- この時点ではStagingサービスが未起動のため、公開URLはオリジン接続エラーになる（想定どおり。手順7で解消する）
+- この時点ではStagingサービスが未起動のため、オリジン（`http://127.0.0.1:18814`）には接続できない。ただしAccess保護下では未認証アクセスがまず**302（Accessログイン）**になる（bypassなし。§4参照）
+
+**実施結果（2026-10-16、オーナーY委譲）**
+
+- 既存Tunnel`mirai-web-cad`（`f8c9fb57-fb21-4a24-b1be-f7dd5699badc`）へCNAME`mirai-web-cad-stg.mirai-dx-platform.com`（id `1ce6a00f970aa00c1b152d33bebec2a8`、account `4f1e888469df7e0b896bb4e211b12633`、zone `e375e651e49a40801a305b89e297bff0`）を作成（proxied、向き先`f8c9fb57-...cfargotunnel.com`）
+- `~/.cloudflared/mirai-web-cad-config.yml`へ`mirai-web-cad-stg.mirai-dx-platform.com → http://localhost:18814`のingress行を追加。変更前のbackupは`mirai-web-cad-config.yml.bak-20261016T093601`
+- `cloudflared tunnel ingress validate`はOK、`cloudflared tunnel ingress rule https://mirai-web-cad-stg.mirai-dx-platform.com/`はルール#2にマッチ
+- `mirai-web-cad-cloudflared.service`を2026-10-16 09:38 JSTに再起動し、4コネクタが再登録。この再起動で共用Tunnelの本番・MVPが短時間中断した（再起動後は本番`/api/health`=200・本番`/api/drawings/demo`=200・MVP`/`=302でいずれも不変を確認）
+- ローカルでは本番18812 health=200、MVP18813 health=200、Staging18814は未起動（000）
 
 **ロールバック**
 
 - CloudflareダッシュボードまたはAPIで、`mirai-web-cad-stg.mirai-dx-platform.com`のCNAMEレコードを削除する
 - `~/.cloudflared/mirai-web-cad-config.yml`からStagingのingress行を削除し、`sudo systemctl restart mirai-web-cad-cloudflared.service`
 
-## 4. Human Gate 2: Access Application/Policy新設
+## 4. Human Gate 2: Access Application/Policy新設【実施済み 2026-10-16】
 
 Stagingホスト名の**ホスト全体**をCloudflare Accessで保護します。許可対象は`kensan1969@gmail.com`のみとし、bypass policyは作りません（本番の公開デモ用bypassを引き継がない）。
 
@@ -113,6 +130,13 @@ curl -sI https://mirai-web-cad-stg.mirai-dx-platform.com/ | head -1
 - 未認証アクセスが302でAccessログインへリダイレクトされる
 - `kensan1969@gmail.com`だけがログインできる
 - オリジン（サービス）が未起動でも、エッジ層でAccessが先に働く
+
+**実施結果（2026-10-16、オーナーY委譲）**
+
+- Staging Access Application`mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`（aud `826bd6bc9d3b8e74214dbcd09376c0e803092e272db1d9ce4e8190d98d6302bf`、type self_hosted、session 24h、http_only_cookie_attribute true、app_launcher_visible false、auto_redirect_to_identity false、options_preflight_bypass true）
+- Staging allow policy`allow-kensan-only` = `6a4e42ff-8133-4225-ad80-d2ca654a8d75`（decision allow、include email `kensan1969@gmail.com`、precedence 1、exclude/requireなし。bypassなし）
+- 検証: `https://mirai-web-cad-stg.mirai-dx-platform.com/`はHTTP **302**で`https://winter-lake-f4c9.cloudflareaccess.com/cdn-cgi/access/login/...`（StagingのAUD）へ。Staging`/api/health`も302（Access先行）。本番`/api/health`=200、本番`/api/drawings/demo`=200、MVP`/`=302はいずれも不変
+- 既存の本番専用Access Application（`mirai-web-cad-api` `e0ac286f-412e-4ae4-a969-8befeb7a0b56`、`mirai-web-cad-demo-bypass` `d03ef7a8-9507-410b-b43c-1a0387b49bde`、`mirai-web-cad-health-bypass` `89e00d5d-40ff-4c57-98d3-65a2f215656e`）は変更なし
 
 **ロールバック**
 
@@ -310,16 +334,16 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 
 ## 10. 検証チェックリスト
 
-すべて満たした場合にのみ「Staging構築完了」とします。
+すべて満たした場合にのみ「Staging構築完了」とします。2026-10-16時点では**Gate 1・2（DNS/Access）のみ実施済み**で、以下は未達です（**Stagingはまだ利用できません**）。
 
 - [ ] ローカルhealth: `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名`mirai_web_cad_staging`、`deploy.commit`が配信中のcommitと一致
 - [ ] DB名: `staging.env`の`DATABASE_URL`のDB名が`mirai_web_cad_staging`、`staging-backup.env`の`RESTORE_DATABASE_URL`のDB名が`mirai_web_cad_staging_recovery`
 - [ ] `npm run db:check`がStaging envで成功する
-- [ ] 公開URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`が未認証でAccessログインへ302。bypass policyが存在せず、許可は`kensan1969@gmail.com`のみ
-- [ ] 本番・MVPへ影響なし: `curl -fsS http://127.0.0.1:18812/api/health`と`http://127.0.0.1:18813/api/health`が変更なく成功し、本番・MVPの公開URLが従来どおり動作する
+- [x] 公開URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`が未認証でAccessログインへ302。bypass policyが存在せず、許可は`kensan1969@gmail.com`のみ（**2026-10-16のGate 1・2で達成済み**）
+- [ ] 本番・MVPへ影響なし: `curl -fsS http://127.0.0.1:18812/api/health`と`http://127.0.0.1:18813/api/health`が変更なく成功し、本番・MVPの公開URLが従来どおり動作する（2026-10-16のTunnel再起動で本番・MVPは短時間中断したが、直後の実測ではいずれも不変）
 - [ ] タイマー: backup/backup-check/monitor/restore-drillの4タイマーが`enabled`かつ`active (waiting)`
 - [ ] ジョブ初回成功: バックアップ・鮮度検査・復元ドリル・監視がそれぞれ1回以上成功している
-- [ ] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した
+- [ ] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した（Gate 1・2の実施内容は§3・§4と`state.json`へ記録済み）
 
 ## 11. 本番・MVPとの分離境界（再確認）
 

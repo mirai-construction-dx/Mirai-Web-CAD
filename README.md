@@ -96,7 +96,7 @@ GitHub正本は`mirai-construction-dx/Mirai-Web-CAD`です。2026-08-26に`Const
 | 用途 | URL | 状態 |
 | --- | --- | --- |
 | MVP（今回の確認用） | `https://mirai-web-cad-mvp.mirai-dx-platform.com/` | Cloudflare Accessでサイト全体を保護。`kensan1969@gmail.com`だけログイン可能。データはローカルPostgreSQLの専用DB`mirai_web_cad_mvp`へ保存 |
-| Staging（リリース候補の検証用、構築準備中） | `https://mirai-web-cad-stg.mirai-dx-platform.com/` | **未公開**。本番と同一構成でリリース候補・migration・デプロイ手順を検証する環境。設計は[ADR-0005](docs/adr/ADR-0005-staging-environment.md)で確定したが、ホスト未反映（DNS・Access・秘密情報・systemd・DBはオーナーY/N待ち）。データは使い捨てで本番へ昇格しない |
+| Staging（リリース候補の検証用、オリジン未構築） | `https://mirai-web-cad-stg.mirai-dx-platform.com/` | 本番と同一構成でリリース候補・migration・デプロイ手順を検証する環境。設計は[ADR-0005](docs/adr/ADR-0005-staging-environment.md)で確定し、DNS・Accessは2026-10-16に公開済み（未認証アクセスはAccessログインへ302）。ただしサービス・DB・秘密情報・systemdは未構築のため**オリジンは未提供**。データは使い捨てで本番へ昇格しない |
 | Custom Domain(本番) | `https://mirai-web-cad.mirai-dx-platform.com/` | Cloudflare Tunnel経由でローカル常駐サーバーへ配信。SPAと公開デモは匿名閲覧可(匿名応答から操作者のメールアドレス等は除く)。任意図面と全更新APIはCloudflare Accessで保護。未認証アクセスはエッジ層で302(Accessログインへのリダイレクト)、アプリ層に到達した場合は401 |
 | Cloudflare Pages(参考、ロールバック用) | `https://mirai-web-cad.pages.dev/` | mainマージでは更新されない。SPAのみ200、`/api`は移行前のコードのままで機能しない |
 

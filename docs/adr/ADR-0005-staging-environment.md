@@ -2,7 +2,7 @@
 
 ## ステータス
 
-承認済み(Accepted、2026-10-16) — オーナーの「CTOへ全権委譲」指示(2026-10-16)のもと、CTOが設計を決定。実際のホスト反映(DNS・秘密情報・systemd配置)は[GITHUB_POLICY.md](../../GITHUB_POLICY.md) §8のHuman GateとしてオーナーのY/N後に行う。
+承認済み(Accepted、2026-10-16) — オーナーの「CTOへ全権委譲」指示(2026-10-16)のもと、CTOが設計を決定。DNS・Access・Tunnel ingressは2026-10-16にオーナーのY委譲のもとでプロビジョニング済み(実施結果は[Staging構築手順書](../runbooks/staging-bringup.md) §3・§4)。残る秘密情報・DB・systemd配置・復元ドリル・最終検証は[GITHUB_POLICY.md](../../GITHUB_POLICY.md) §8のHuman GateとしてオーナーのY/N後に行う。
 
 ## コンテキスト
 
@@ -71,11 +71,20 @@ Stagingは「**本番と同一構成で、リリース候補・migration・デ�
 
 [GITHUB_POLICY.md](../../GITHUB_POLICY.md) §8および[AGENTS.md](../../AGENTS.md) §4に従い、次はコードのマージとは別にオーナーのY/Nを得てから実行する。手順は[Staging構築手順書](../runbooks/staging-bringup.md)にまとめる。
 
-- Stagingホスト名のDNS route作成(公開DNS変更)
-- Access Application/Policyの新設(公開範囲の変更)
+**2026-10-16にオーナーがCloudflare自動化をCTOへY委譲し、次の2件を実施済み**（追加はすべて可逆: DNS CNAME 1件・Access Application/Policy 1組・Tunnel ingress 1行）。
+
+- ✅ Stagingホスト名のDNS route作成(公開DNS変更) — CNAME `mirai-web-cad-stg.mirai-dx-platform.com`(id `1ce6a00f970aa00c1b152d33bebec2a8`、既存Tunnel `f8c9fb57-fb21-4a24-b1be-f7dd5699badc`へ)
+- ✅ Access Application/Policyの新設(公開範囲の変更) — Application `mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`、allow policy `allow-kensan-only` = `6a4e42ff-8133-4225-ad80-d2ca654a8d75`(`kensan1969@gmail.com`のみ、bypassなし)
+
+Tunnel ingress(`mirai-web-cad-stg.mirai-dx-platform.com → http://localhost:18814`)はホスト設定`~/.cloudflared/mirai-web-cad-config.yml`へ追加済み。未認証の公開URLは302でAccessログインへ遷移することを実測した。実施・検証の詳細は[Staging構築手順書](../runbooks/staging-bringup.md) §3・§4を参照。
+
+**残るHuman Gate(オーナーのY/N待ち。未実施のためStagingは未利用)**
+
 - `~/.config/mirai-web-cad/staging.env`・`staging-backup.env`の作成(秘密情報の追加)
-- systemd unitの配置・enable(本番デプロイ手順の変更)
 - Staging用DB/ロールの作成
+- systemd unitの配置・enable(本番デプロイ手順の変更)
+- 復元ドリルの初回実行
+- 公開URLの最終検証(ローカルhealth・接続DB名・タイマー)
 
 コード・設定ファイル・unit定義・CI・文書のマージは、GitHub RulesetのRequired Checks通過後にauto-mergeで行う(中央ポリシー v2)。
 
@@ -94,5 +103,6 @@ Stagingは「**本番と同一構成で、リリース候補・migration・デ�
 
 - 追加する資産: `deploy/systemd/mirai-web-cad-staging*.service`/`.timer`、`scripts/check-staging-health.sh`、`infra/cloudflare`のstaging定義(変数化・管理スイッチ据え置き)、`docs/runbooks/staging-bringup.md`、CIのstaging構成検査。
 - 変更する資産: `scripts/deploy-local.sh`(3系統対応)、`scripts/check-deploy-drift.mjs`および`mirai-web-cad-deploy-drift.service`(staging URL追加)、`docs/deployment-local.md`・`docs/operations.md`・`README.md`・`state.json`。
-- 未実施(オーナーY/N後): ホストへの反映(DNS route、Access Application、秘密情報、systemd配置、DB/ロール作成)。
+- 実施済み(2026-10-16、オーナーY委譲): Cloudflare資源のプロビジョニング(DNS CNAME、Tunnel ingress、Access Application/Policy)。追加はすべて可逆。
+- 未実施(オーナーY/N後): 秘密情報(`staging.env`・`staging-backup.env`)、Staging用DB/ロール作成、systemd配置、復元ドリル、最終検証。したがってStagingはまだ利用できない。
 - 差分・残課題は[基盤連携の要件と現状](../architecture/platform-integration.md)と[外部入力・確定待ち台帳](../external-input-status.md)に記録する。

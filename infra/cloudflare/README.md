@@ -83,6 +83,8 @@ planにcreate/update/destroyが現れる、またはpolicy変更・`everyone`・
 
 ## 現在の移行状態
 
-コード、guardrail、CI検証は準備済みです。2026-09-05の再棚卸しではtoken verifyは成功しましたが、DNS APIは`403/code 10000`、Access Application APIはHTTP 200でも0件でした。対象account/zoneへ必要権限を付けたtokenと正しいZero Trust accountを確認できないため、実資源のID棚卸し・import・初回plan/applyは未実施です。権限付与後も最初にread-only inventoryを行い、既存設定との差分をレビューしてから管理を有効化します。詳細は[外部入力・確定待ち台帳](../../docs/external-input-status.md)を参照してください。
+コード、guardrail、CI検証は準備済みです。2026-09-05の再棚卸しではtoken verifyは成功しましたが、DNS APIは`403/code 10000`、Access Application APIはHTTP 200でも0件でした。2026-10-16にオーナーがCloudflare自動化をCTOへY委譲し、**Web-CAD自身の資源のread-only inventoryは完了**しました。account `4f1e888469df7e0b896bb4e211b12633`、zone `mirai-dx-platform.com` = `e375e651e49a40801a305b89e297bff0`、Tunnel `mirai-web-cad` = `f8c9fb57-fb21-4a24-b1be-f7dd5699badc`、本番/MVP/StagingのDNS record ID、MVP/StagingのAccess Application IDとAUD、allow policy IDを実測し、**`terraform.tfvars`(Git管理外、ローカル作成)へ記録**しました(一覧は[外部入力・確定待ち台帳](../../docs/external-input-status.md)§1)。
 
-Stagingの定義(2026-10-16追加)も同じ状態です。コード化のみで、Staging IDは未棚卸しのため`staging_inventory_ready=false`のままです。ホスト反映は、オーナーのY/N後に[Staging構築手順書](../../docs/runbooks/staging-bringup.md)のHuman Gateとして実施します。
+ただし**`enable_management=false`を維持**しており、import-only plan/applyは未実施です。管理を有効化する際は、記録済みIDを入力して`enable_management=true`とし、import-only planに差分(特にpolicy変更・`everyone`・`email_domain`・`bypass`・Tunnel/DNS置換)が無いことを確認してからapplyします。詳細は[外部入力・確定待ち台帳](../../docs/external-input-status.md)を参照してください。
+
+Stagingの定義(2026-10-16追加)も同じく未管理です。`-stg`命名は組織の他ConsumerのStaging公開ホスト名(`arcsphere-stg`、`cssp-stg`、`construction-os-stg`)と揃え、同じ`<app>-stg`＋`self_hosted`＋session 24hのパターンで作成しました。Staging CNAMEとAccess Application/Policyは2026-10-16にプロビジョニング済みで、実ID(Staging CNAME `1ce6a00f970aa00c1b152d33bebec2a8`、Access Application `552bd803-cd79-4376-a388-278917378955`、allow policy `6a4e42ff-8133-4225-ad80-d2ca654a8d75`)を`terraform.tfvars`へ記入済みです。ただし`enable_management=false`を維持するためStaging資源はplan/applyに現れません。Staging Access Applicationは`imports.tf`の対象外のため、管理を有効化する際はオーナーが明示的に`terraform import`します。残るHuman Gate(秘密情報・DB・systemd配置・復元ドリル・最終検証)は[Staging構築手順書](../../docs/runbooks/staging-bringup.md)を正とします。
