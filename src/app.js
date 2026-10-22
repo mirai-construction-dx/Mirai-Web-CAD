@@ -474,7 +474,7 @@ function render() {
           <button type="button" data-space="layout" class="space-tab ${state.space === "layout" ? "active" : ""}" aria-pressed="${state.space === "layout"}">レイアウト1</button>
           <div class="spacer"></div>
           <span class="zoom-readout">${zoomReadoutText()}</span>
-          <button id="fitBtn" type="button" title="図面範囲表示" aria-label="図面範囲表示">全体表示</button>
+          <button id="fitBtn" type="button" title="図面範囲表示" aria-label="全体表示（図面範囲表示）">全体表示</button>
         </div>
         ${state.space === "layout" ? layoutSpaceHtml(activeLayoutDrawing(drawing)) : modelSpaceHtml(drawing)}
       </section>
