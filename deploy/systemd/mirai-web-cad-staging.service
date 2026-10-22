@@ -10,7 +10,9 @@ StartLimitBurst=5
 Type=simple
 User=kensan
 Group=kensan
-WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
+# Stagingは本番・MVPと共有しない独立ランタイム(releases/<sha> + current symlink)から配信する。
+# scripts/deploy-staging.sh がcurrentを原子切替し、このユニットだけを再起動する(ADR-0006)。
+WorkingDirectory=/home/kensan/.local/share/mirai-web-cad/staging-runtime/current
 EnvironmentFile=/home/kensan/.config/mirai-web-cad/staging.env
 Environment=PORT=18814
 Environment=NODE_ENV=production
