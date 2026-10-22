@@ -4,9 +4,12 @@
 # 検査対象は次の5点。
 #   (a) 期待するstaging systemd unitが存在し、空でないこと
 #   (b) 関連シェルスクリプトの構文(bash -n)はCI側のステップで検査する
+#       (deploy-staging.shはこのスクリプト内でもbash -nする)
 #   (c) 各unitが必須ディレクティブ(staging env・PORT/LOCAL_URL・OnFailure 等)を持つこと
-#   (d) deploy-local.shがstaging(18814)へ対応し、DB名が定義側で一致していること
-#   (e) stagingが本番専用の経路へ配線されていないこと
+#   (d) deploy-staging.shが存在し実行可能で、独立ランタイム(~/.local/share/mirai-web-cad/
+#       staging-runtime)の releases/<sha> へ構築し、current symlinkを原子切替する方式であること
+#   (e) stagingが本番専用の経路へ配線されておらず、本番デプロイ(deploy-local.sh)が
+#       stagingへ触れないこと
 #   (f) 構築後/構築中の繰り返し検証ツール(check-staging-readiness.sh・verify-staging-domain.mjs・
 #       test:e2e:staging)がリポジトリ内に存在し、空でないこと
 set -euo pipefail
@@ -47,12 +50,14 @@ done
 
 # (c) 必須ディレクティブ。unitファイルに期待する値を1行単位で確認する。
 
-# 常駐サービス: staging専用envとポート18814を参照する。
+# 常駐サービス: staging専用env・専用ランタイムのcurrent・ポート18814を参照する。
 svc=deploy/systemd/mirai-web-cad-staging.service
 require_line "$svc" '^\[Service\]$' '[Service]セクション'
 require_line "$svc" '^EnvironmentFile=/home/kensan/\.config/mirai-web-cad/staging\.env$' 'staging.env の EnvironmentFile='
+# 独立リリース: 本番ツリーを共有せず、deploy-staging.shが切り替えるcurrentから配信する。
+require_line "$svc" '^WorkingDirectory=/home/kensan/\.local/share/mirai-web-cad/staging-runtime/current$' '独立ランタイムの WorkingDirectory='
+require_line "$svc" '^ExecStart=.*scripts/serve-production\.mjs$' 'scripts/serve-production.mjs を指す ExecStart='
 require_line "$svc" '^Environment=PORT=18814$' 'PORT=18814'
-require_line "$svc" '^ExecStart=' 'ExecStart='
 require_line "$svc" '^Restart=on-failure$' 'Restart=on-failure'
 require_line "$svc" '^WantedBy=multi-user\.target$' 'WantedBy=multi-user.target'
 
@@ -101,17 +106,31 @@ for t in deploy/systemd/mirai-web-cad-staging-backup.timer \
   require_line "$t" '^WantedBy=timers\.target$' 'WantedBy=timers.target'
 done
 
-# (d) deploy-local.shがstaging(3系統目)へ対応していること(ADR-0005 §2)。
-require_line scripts/deploy-local.sh '18814' 'stagingポート18814の参照'
-require_line scripts/deploy-local.sh 'mirai-web-cad-staging\.service' 'stagingサービスの配信対象への組み込み'
-# Staging DB名はdeploy-local.shではenv(staging.env)から解決する(MVPと同じ方式)。
-# そのためdeploy-local.shを含むstaging配備面(unit・健全性スクリプト)全体で定義が揃っていることを確認する。
+# (d) Stagingの独立リリース(deploy-staging.sh)。本番のdeploy-local.shとは別の経路で、
+#     専用ランタイムの releases/<sha> を構築し、current symlinkを原子的に切り替える。
+deploy_staging=scripts/deploy-staging.sh
+[[ -x "$deploy_staging" ]] || fail_msg "実行可能なデプロイスクリプトがありません: $deploy_staging"
+if ! bash -n "$deploy_staging"; then
+  fail_msg "$deploy_staging に構文エラーがあります"
+fi
+require_line "$deploy_staging" 'staging-runtime' '専用ランタイム(staging-runtime)の参照'
+require_line "$deploy_staging" 'releases/' 'releases/<sha> 方式'
+require_line "$deploy_staging" 'git archive' 'git archiveによる対象commitの書き出し'
+require_line "$deploy_staging" 'npm ci --ignore-scripts' 'npm ci --ignore-scripts'
+require_line "$deploy_staging" 'BUILD_COMMIT=' 'BUILD_COMMITの付与'
+require_line "$deploy_staging" 'npm run db:check' '読み取り専用のdb:check'
+require_line "$deploy_staging" 'ln -sfn' 'current symlinkの作成(ln -sfn)'
+require_line "$deploy_staging" 'mv -Tf' 'current symlinkの原子切替(mv -Tf)'
+require_line "$deploy_staging" 'mirai-web-cad-staging\.service' '再起動対象のStagingサービス'
+require_line "$deploy_staging" '18814|STAGING_PORT' 'Stagingポート18814の参照'
+require_line "$deploy_staging" 'mirai_web_cad_staging' '期待するStaging DB名'
+# Staging DB名はenv(staging.env)から解決しつつ、Staging配備面全体で定義が揃っていることを確認する。
 if ! grep -q 'mirai_web_cad_staging' \
-  scripts/deploy-local.sh \
+  "$deploy_staging" \
   deploy/systemd/mirai-web-cad-staging.service \
   deploy/systemd/mirai-web-cad-staging-monitor.service \
   scripts/check-staging-health.sh; then
-  fail_msg 'Staging DB名 mirai_web_cad_staging がstaging配備面(deploy-local.sh/unit/健全性スクリプト)で参照されていません'
+  fail_msg 'Staging DB名 mirai_web_cad_staging がstaging配備面(deploy-staging.sh/unit/健全性スクリプト)で参照されていません'
 fi
 
 # (e) stagingを本番専用の経路へ配線していないこと(ADR-0005 §3)。
@@ -132,6 +151,10 @@ done
 require_absent deploy/systemd/mirai-web-cad-offsite-backup.service 'staging' 'Stagingのオフサイト転送への組み込み'
 # 5. 本番サービスunitはstagingを参照しない。
 require_absent deploy/systemd/mirai-web-cad.service 'staging' '本番サービスunitからのStaging参照'
+# 6. 本番デプロイ(deploy-local.sh)はStagingに触れない。Stagingはdeploy-staging.shだけが更新する。
+require_absent scripts/deploy-local.sh 'mirai-web-cad-staging\.service' '本番デプロイからのStagingサービス参照'
+require_absent scripts/deploy-local.sh '18814' '本番デプロイからのStagingポート参照'
+require_absent scripts/deploy-local.sh 'staging\.env|STAGING_' '本番デプロイからのStaging env参照'
 
 # (f) 構築後/構築中の繰り返し検証ツールがリポジトリ内に存在し、空でないこと。
 # Readinessチェッカーと公開URL E2Eは、ホスト反映後の疎通確認で使う(staging-bringup.md §12)。
@@ -145,4 +168,4 @@ if [[ "$fail" -ne 0 ]]; then
   echo "Staging構成検査: 失敗があります。" >&2
   exit 1
 fi
-echo "Staging構成検査 ok: unit 9件・必須ディレクティブ・deploy-local.shのstaging対応・本番経路との非配線を確認しました。"
+echo "Staging構成検査 ok: unit 9件・必須ディレクティブ・deploy-staging.shの独立ランタイム方式・本番経路との非配線を確認しました。"

@@ -22,6 +22,7 @@
     "build": "node scripts/build.mjs",
     "start:production": "node scripts/serve-production.mjs",
     "deploy:local": "bash scripts/deploy-local.sh",
+    "deploy:staging": "bash scripts/deploy-staging.sh",
     "deploy:drift": "node scripts/check-deploy-drift.mjs",
     "deploy:drift:live": "node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812",
     "compat:report": "node scripts/compat-report.mjs",

@@ -3,13 +3,12 @@
 // .claude/plans/参照)。ローカル開発サーバーは緩い既定値で動くが、本番はセキュリティ
 // 上重要な環境変数(認証モード等)を必須化し、欠落時は起動そのものを拒否する。
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { handleApiRequest } from "../src/api-handler.js";
 import { closeDataStorePool, createDataStore } from "../src/data-store.js";
 import { ROLE_POLICIES } from "../src/cad-core.js";
-import { DEPLOY_PROVENANCE, evaluateDeployProvenance } from "./lib/deploy-info.mjs";
+import { DEPLOY_PROVENANCE, evaluateDeployProvenance, readBuildInfoCommit, resolveDeployCommit } from "./lib/deploy-info.mjs";
 import {
   CONTENT_TYPES,
   RequestBodyTooLargeError,
@@ -44,11 +43,15 @@ const env = validateEnv();
 // DEPLOY_GUARD=strict を設定した場合のみ、未レビューのcommitが稼働している状態での
 // 起動を拒否する(fail-closed)。本番のproduction.envへ設定するかは運用判断とする。
 const deployInfo = evaluateDeployProvenance({ cwd: root });
+// git情報が無いアーカイブ配信(独立リリースのStaging等)では、配信物のbuild元commitを
+// deploy.commitとして報告する。git情報がある本番では従来どおりgit HEADを優先する
+// (既存の本番挙動は変えない)。provenanceの判定はgit情報の有無に依存するためunknownのまま。
+const deployCommit = resolveDeployCommit(deployInfo.info, { distRoot: staticRoot });
 env.DEPLOY_INFO = {
   // 配信物(dist/)のbuild元commit。デプロイでdistのsymlinkが切り替わるため、healthのたびに読む。
-  distCommit: () => readDistCommit(staticRoot),
-  commit: deployInfo.info.commit,
-  commitShort: deployInfo.info.commitShort,
+  distCommit: () => readBuildInfoCommit({ distRoot: staticRoot }),
+  commit: deployCommit.commit,
+  commitShort: deployCommit.commitShort,
   branch: deployInfo.info.branch,
   dirty: deployInfo.info.dirty
 };
@@ -57,9 +60,15 @@ log("info", "starting", {
   host,
   appEnv: env.APP_ENV,
   authMode: env.AUTH_MODE,
-  deploy: { ...env.DEPLOY_INFO, provenance: deployInfo.status, ahead: deployInfo.counts?.ahead ?? null, behind: deployInfo.counts?.behind ?? null }
+  deploy: {
+    ...env.DEPLOY_INFO,
+    commitSource: deployCommit.source,
+    provenance: deployInfo.status,
+    ahead: deployInfo.counts?.ahead ?? null,
+    behind: deployInfo.counts?.behind ?? null
+  }
 });
-enforceDeployGuard(deployInfo);
+enforceDeployGuard(deployInfo, deployCommit);
 
 await failFastProbe(env);
 
@@ -279,19 +288,11 @@ function requireEnv(name, missing) {
 // - strict: 未レビューのcommitが稼働している状態での起動を拒否する(EX_CONFIG=78)。
 // 「本番で何が動いているか分からない」状態を検知可能にするのが目的であり、
 // 検知そのものが業務を止めないよう既定は継続とする(docs/operations.md参照)。
-function readDistCommit(distRoot) {
-  try {
-    const info = JSON.parse(readFileSync(path.join(distRoot, "build-info.json"), "utf8"));
-    return typeof info.commit === "string" ? info.commit : null;
-  } catch {
-    return null;
-  }
-}
-
-function enforceDeployGuard(deploy) {
+function enforceDeployGuard(deploy, commit) {
   const detail = {
     provenance: deploy.status,
-    commit: deploy.info.commit,
+    commit: commit?.commit ?? deploy.info.commit,
+    commitSource: commit?.source ?? null,
     branch: deploy.info.branch,
     dirty: deploy.info.dirty,
     ahead: deploy.counts?.ahead ?? null,
@@ -299,7 +300,14 @@ function enforceDeployGuard(deploy) {
   };
   if (deploy.status === DEPLOY_PROVENANCE.UNKNOWN) {
     // 判定できないこと自体は起動を止めないが、「一致」と誤解されないよう必ず記録する。
-    log("warn", "deploy provenance guard: cannot determine provenance (origin/main ref may be missing)", detail);
+    // git情報を持たないアーカイブ配信では、配信物のbuild元commitを報告している旨を明示する。
+    log(
+      "warn",
+      commit?.source === "build-info"
+        ? "deploy provenance guard: git metadata unavailable, reporting dist build commit"
+        : "deploy provenance guard: cannot determine provenance (origin/main ref may be missing)",
+      detail
+    );
     return;
   }
   const drifted = deploy.status === DEPLOY_PROVENANCE.AHEAD || deploy.status === DEPLOY_PROVENANCE.DIRTY;
