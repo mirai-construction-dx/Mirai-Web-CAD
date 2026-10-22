@@ -1,6 +1,6 @@
 # 外部入力・確定待ち台帳
 
-更新日: 2026-10-16
+更新日: 2026-10-23
 
 コードだけでは確定できない運用情報を、推測値で埋めないための台帳です。秘密値、個人の電話番号、実案件名、図面本体はGitへ保存しません。
 
@@ -52,18 +52,20 @@
 
 全体構成 V3.6・リポジトリ構成 V3.6・OS/アプリ選定 V3.5 とWeb-CADの差のうち、本リポジトリだけでは確定できない事項。詳細は[基盤連携の要件と現状](architecture/platform-integration.md)。
 
-| 事項 | 状態(2026-09-25) | 内容・次の入力 |
+| 事項 | 状態(決定日／2026-10-23再確認) | 内容・次の入力 |
 | --- | --- | --- |
-| 1. system_id | **決定・登録済み** | `web-cad`(オーナー決定)。Core `registries/systems.yaml`への登録は**PR #27が2026-09-28にマージ済み(登録完了)**。Platform-Infraの台帳は未作成 |
+| 1. system_id | **決定・登録済み** | `web-cad`(オーナー決定)。Core `registries/systems.yaml`への登録は**PR #27が2026-09-28にマージ済み(登録完了)**。**Platform-Infraの`systems.yaml`にも登録済み**(2026-10-12追加、`uses_core: false`、`production: false`。2026-10-23実測)。Coreの`registries/integration-baseline.json`ではWeb-CADは「宣言なし」(`declared_version: null`) |
 | 2. AI Provider直接呼出し | **決定** | 案A(期限付きの暫定例外)、見直し期限2026-12-25([ADR-0003](adr/ADR-0003-ai-provider-direct-call-interim.md)承認済み)。移行条件はMCAH Model GatewayのWeb-CAD向け契約公開とsystem_id登録 |
 | 3. マージ前の人間レビュー | **決定(2026-09-30改定)** | **中央ポリシー v2 の自動マージへ統一(A型を廃止)**: PR は `gh pr merge --auto --squash` で自動マージを予約する。マージの条件は Required Checks の全成功と merge conflict がないことだけとし、人間の Y/N・選択・Approve を待たない。`--admin` による迂回は禁止する。Release・本番デプロイ・秘密情報の変更・不可逆な削除は、コードのマージとは別に Human Gate とする。（正本: 中央ポリシー `GITHUB_POLICY.md` v2） 以下は2026-09-25改定(A型)の記録:  Bot名義のPRにオーナーがGitHub上でApproveしてからマージ(承認1件+CODEOWNER、最後のpush後の承認、スレッド解決を必須)。Botは2人目の代わりにしない。**2人目の承認者は2026-10以降に決定**(オーナー判断)。基盤方針の通常2名・重要3名を満たしていないリスクを、下記の補完策を前提に受け入れる。**見直し期限 2026-10-31**。先送りを終える契機: 実案件図面の取扱い開始、オーナー以外の利用者への提供開始、見直し期限の到来のいずれか |
 | 4. CODEOWNERSのTeam | **決定(2026-09-30改定)** | CODEOWNERはレビュー依頼先とし、承認は必須でない(2026-09-25〜09-30はA型のため必須化していた)。当面は個人`@Kensan196948G`(管理者権限あり)をCODEOWNERとし、2人目の決定時にWrite以上のTeamへ移す |
 | 5. 技術標準の適用範囲 | **決定** | アプリ構成は例外として維持、実行環境はNode 24へ2027-01-31まで、PostgreSQL 18へ2027-11-30までに更新([ADR-0004](adr/ADR-0004-tech-stack-vs-os-selection.md)承認済み) |
-| 6. Core成果物の版 | **決定** | 取り込むのはCoreのGitHub Releaseのみ(タグのvendoringはしない)。`SHA256SUMS`照合と`mhc verify`に加え、署名・来歴証明の検証を必須とする(v0.7.0(Latest)も署名・attestationなし、2026-10-02確認)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で、必要な版の署名付きReleaseが無ければCoreへ作成を依頼する。手順は[基盤連携の要件と現状](architecture/platform-integration.md)§3 |
-| 7. 案件ID・確定版・MCP | **決定** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続し、MCIPの案件ID API公開時に外部ID列をadditive migrationで追加。確定版: CDEのAPI公開時に承認済み版を登録。MCP: 読み取り系ツールから、Coreで契約化→Allowlist登録の順 |
+| 6. Core成果物の版 | **決定(2026-10-23再確認)** | 取り込むのはCoreのGitHub Releaseのみ(タグのvendoringはしない)。`SHA256SUMS`照合と`mhc verify`に加え、署名・来歴証明の検証を必須とする。**Latestは`v0.8.0`(2026-10-19公開)だが、署名・attestationは無い**(`/attestations/sha256:<digest>`が404、`registries/signing-keys.yaml`は`keys: []`、`release.yml`のbuildジョブは`if: false`。2026-10-23実測)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で、必要な版の署名付きReleaseが無ければCoreへ作成を依頼する。手順は[基盤連携の要件と現状](architecture/platform-integration.md)§3 |
+| 7. 案件ID・確定版・MCP | **決定(2026-10-23再確認)** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続する。MCIPには案件の**読み取り**API(`GET /api/v1/projects`、`GET /api/v1/projects/:code`)はあるが、**全社共通の案件IDを発番・配布するAPIは未実装**(MCIP `docs/architecture/V3.2整合性評価.md:14`、2026-10-23実測)。公開時に外部ID列をadditive migrationで追加。確定版: CDEにはREST APIとMCPツールがあるが、**Web-CAD向けの承認済み版登録API・クライアント登録は無い**(2026-10-23実測)。CDEの受入API公開時に登録する。MCP: Coreの`mcp_server_id`は`null`、`registries/mcp-allowlist.yaml`に`web-cad`は無い。読み取り系ツールから、Coreで契約化→Allowlist登録→Entra App ID URI確定の順 |
 | 8. Organization名 | **決定** | `mirai-construction-dx`に統一。原典(全体構成 V3.6)のHTMLは変更せず、Portfolioの未決事項表(PORT-BL-001 BL-06)に決定を記録(Portfolio PR #20) |
+| 9. CDEの承認済み版登録API | **外部入力待ち(2026-10-23追加)** | Web-CADの確定版をCDEへ登録するAPI・認証・受入設計がCDE側に無い。CDEが(1)登録API、(2)Web-CAD用のクライアント認証、(3)版・承認・証跡の受入形式を提供するまで実装しない。詳細は[基盤連携の要件と現状](architecture/platform-integration.md)§6.4・§6.7 |
+| 10. Staging E2E(Access Service Token) | **オーナー実施待ち(2026-10-23追加)** | Staging公開URLをAccess Service Tokenで認証するE2E(`npm run test:e2e:staging`)は、テスト時だけService Tokenを発行・削除する運用のためオーナーが実施する。トークン値はGit・ログ・チャットへ出さない。手順は[Staging構築手順書](runbooks/staging-bringup.md)§12 |
 
-2026-10-16に読み取りで再確認: Core `origin/main` の `registries/systems.yaml` に `web-cad` が登録済み。Core main は 0.8.0、GitHub Release の Latest は `v0.7.0`(署名・attestationは依然なし)、Core のマージ規定も自動マージへ統一済み。他Consumerの pin 状況は Core `docs/integration-audit-2026-10-05.md` を参照。Staging環境([ADR-0005](adr/ADR-0005-staging-environment.md))は第3段階まで新しいリポジトリ間結合を追加しない。
+2026-10-23に読み取りで再確認: Core `origin/main`(`7e799e5`)の`registries/systems.yaml`に`web-cad`が登録済み。Latest Releaseは`v0.8.0`(2026-10-19公開)で、`contracts.tar.gz`のSHA256は`SHA256SUMS`と一致したが、署名・attestationは無く`signing-keys.yaml`は空のまま。Platform-Infraの`systems.yaml`にも`web-cad`が登録済み(2026-10-12、`uses_core: false`)。MCIPは対外案件ID APIが未実装、CDEはWeb-CAD向けの確定版登録APIが無い。Portfolioのweb-cadはPages本番のみでStaging未登録(別タスクでPORT-OPS-007として登録)。Staging環境([ADR-0005](adr/ADR-0005-staging-environment.md))は第3段階まで新しいリポジトリ間結合を追加しない。
 
 ### 1名承認体制の補完策(2026-09-25)
 
@@ -96,7 +98,11 @@
 - Cloudflare: Web-CAD自身の資源(account/zone/Tunnel/DNS/Access)のread-only棚卸しは完了(2026-10-16、オーナーY委譲)。実IDは`terraform.tfvars`(Git管理外)へ記録済み。共通基盤側を含む一般のimport-only plan/applyは引き続き未実施で、`enable_management=false`を維持する
 - Entra: tenant内の対象UPN、グループGUID対応、Secret運用責任者、当番/SLA台帳の参照IDが確定
 - Phase 0: 許諾済みDXFの保管場所とUAT参加者台帳の参照IDが確定
-- 基盤整合: 8件とも決定済み(2026-09-25)。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7の契機の到来を追跡する
+- 基盤整合: 8件とも決定済み(2026-09-25)。2026-10-23の再実測で、1(Platform-Infra台帳)は登録済み、6は署名付きRelease待ち、7はMCIP/CDEのAPI待ちであることを確認した。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7・9の契機の到来を追跡する
+- Core: 署名鍵(O-16)とattestationが有効なReleaseが公開されたら、`SHA256SUMS`と署名を照合し、`core-lock/`で版固定して`mhc verify`を通す
+- MCIP: 対外案件IDの発番・配布APIが提供されたら、`project_id`の外部ID列をadditive migrationで追加し、読み取り・照合を実装する
+- CDE: Web-CADの承認済み版を受けるAPI・認証・受入形式が提供されたら、登録アダプタを実装する
+- Staging: Access Service Tokenを使うE2Eをオーナーが実施し、結果を記録する
 - オフサイト転送: R2 token・age鍵・ユニット設置の実施(オーナーのY/N後)と、初回転送・復号・通知の試験の成功
 
 再開時も、秘密値や個人情報そのものはIssue、PR、Git、チャットへ貼り付けません。
