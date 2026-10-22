@@ -1,6 +1,6 @@
 # ローカルデプロイ運用メモ
 
-2026-08-30に、本番の永続化先をNeon PostgreSQLからローカルPostgreSQL + Cloudflare Tunnelへ移行済み(Issue #22、ユーザー指示による。移行完了としてclose)。2026-09-05には、本番とデータを分離したMVP URLを同じTunnelへ追加した。2026-10-16には、本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証するStaging環境の設計を[ADR-0005](adr/ADR-0005-staging-environment.md)で確定し、同日にオーナーのY委譲のもとCloudflare資源(DNS CNAME・Tunnel ingress・Access Application/Policy)をプロビジョニングした(秘密情報/systemd/DBはオーナーY/N待ち。手順は[Staging構築手順書](runbooks/staging-bringup.md))。この文書は日常運用手順、およびセットアップ手順の記録(再構築・障害復旧時の参考)を兼ねる。移行の背景・設計判断は`docs/operations.md`の該当節を参照。
+2026-08-30に、本番の永続化先をNeon PostgreSQLからローカルPostgreSQL + Cloudflare Tunnelへ移行済み(Issue #22、ユーザー指示による。移行完了としてclose)。2026-09-05には、本番とデータを分離したMVP URLを同じTunnelへ追加した。2026-10-16には、本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証するStaging環境の設計を[ADR-0005](adr/ADR-0005-staging-environment.md)で確定し、同日にオーナーのY委譲のもとCloudflare資源(DNS CNAME・Tunnel ingress・Access Application/Policy)をプロビジョニングした(秘密情報/systemd/DBはオーナーY/N待ち。手順は[Staging構築手順書](runbooks/staging-bringup.md))。2026-10-23には、Stagingを本番・MVPの作業ツリーから切り離し、**Staging専用ランタイムへ独立デプロイする `scripts/deploy-staging.sh`** を追加した。本番・MVPの反映は従来どおり `scripts/deploy-local.sh` が担い、両スクリプトは互いの環境に触れない。この文書は日常運用手順、およびセットアップ手順の記録(再構築・障害復旧時の参考)を兼ねる。移行の背景・設計判断は`docs/operations.md`の該当節を参照。
 
 ## 構成
 
@@ -15,9 +15,10 @@ Cloudflare Tunnel(mirai-web-cad-cloudflared.service)
   → http://127.0.0.1:18812 (mirai-web-cad.service, scripts/serve-production.mjs)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad, role=mirai_web_cad_app)
 
-Cloudflare Tunnel(mirai-web-cad-cloudflared.service)   # DNS/Access公開済み・オリジン未構築(2026-10-16)
+Cloudflare Tunnel(mirai-web-cad-cloudflared.service)   # DNS/Access公開済み
   → mirai-web-cad-stg.mirai-dx-platform.com
   → http://127.0.0.1:18814 (mirai-web-cad-staging.service)
+  → ~/.local/share/mirai-web-cad/staging-runtime/current (releases/<sha> の独立リリース)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad_staging)
 ```
 
@@ -61,12 +62,13 @@ create database mirai_web_cad_mvp_recovery owner mirai_web_cad_backup;
 
 公開URLの自動確認には`npm run test:e2e:mvp`を使う。PC/スマホ表示、Canvas描画、health、接続DB名、新規図面、LINE作図、サーバー同期を確認する。自動テスト用Access Service Tokenはテスト時だけ作成し、テスト直後にpolicyとtokenの両方を削除する。通常利用のAccess policyへService Tokenを残してはいけない。
 
-### Staging環境(DNS/Access公開済み・オリジン未構築)
+### Staging環境(独立リリース)
 
-- 目的: 本番と同一構成で、リリース候補commitの受入確認、migration適用後状態の確認、`scripts/deploy-local.sh`変更のリハーサル、Cloudflare Access境界の非破壊確認を行う。MVP(機能の操作確認・評価)とは目的が異なり、**Stagingから本番へデータを昇格させない**(昇格するのはコードと設定のみ)。設計は[ADR-0005](adr/ADR-0005-staging-environment.md)を参照
-- URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`(DNS CNAMEとAccessは2026-10-16に公開済み。オリジンが未構築のため未提供で、未認証アクセスは302でAccessログインへ遷移する)
+- 目的: 本番と同一構成で、リリース候補commitの受入確認、migration適用後状態の確認、デプロイ手順のリハーサル、Cloudflare Access境界の非破壊確認を行う。MVP(機能の操作確認・評価)とは目的が異なり、**Stagingから本番へデータを昇格させない**(昇格するのはコードと設定のみ)。設計は[ADR-0005](adr/ADR-0005-staging-environment.md)を参照
+- URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`(DNS CNAMEとAccessは2026-10-16に公開済み)
 - Access(**2026-10-16に新設済み**): ホスト全体をCloudflare IdPで保護し、`kensan1969@gmail.com`だけをallow(bypass policyは作らない)。Application `mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`、allow policy `6a4e42ff-8133-4225-ad80-d2ca654a8d75`
-- Origin: `127.0.0.1:18814` (`mirai-web-cad-staging.service`、**未構築のため未起動**)
+- Origin: `127.0.0.1:18814` (`mirai-web-cad-staging.service`)。systemdユニットの`WorkingDirectory`は `~/.local/share/mirai-web-cad/staging-runtime/current` を指し、`current` は `releases/<sha>` へのsymlink
+- 独立リリース: `scripts/deploy-staging.sh` が `~/.local/share/mirai-web-cad/staging-runtime/releases/<sha>` へ `git archive` + `npm ci --ignore-scripts` + `BUILD_COMMIT=<sha> npm run build` で構築し、`current` を原子切替してStagingサービスだけを再起動する。本番・MVPの作業ツリー(`dist`/`node_modules`/git HEAD)には触れない。古い`releases`は直近3件とロールバック先を残して削除する
 - DB: ローカルPostgreSQLの`mirai_web_cad_staging`。本番DB`mirai_web_cad`・MVP DB`mirai_web_cad_mvp`とは分離
 - 秘密値: `~/.config/mirai-web-cad/staging.env` (mode 0600、Git管理外)
 - Backup: `mirai-web-cad-staging-backup.timer`が専用DBを`/var/backups/mirai-web-cad/staging-postgres/`へ日次保存(毎日03:50 JST、保持14日)。`mirai-web-cad-staging-backup-check.timer`が鮮度(36時間以内・0バイト超)を毎日06:45 JSTに検査
@@ -77,7 +79,7 @@ create database mirai_web_cad_mvp_recovery owner mirai_web_cad_backup;
 `staging.env`は`production.env`と同じ必須項目を持つ。`DATABASE_URL`のDB名、`CF_ACCESS_AUD`、`CORS_ORIGIN`をStaging専用値にし、`ACCESS_ROLE_MAP`は許可メール1件だけにする。バックアップと復元ドリルは、アプリ用envとは分離した`~/.config/mirai-web-cad/staging-backup.env`を使う。変数名はMVPの`mvp.env`/`mvp-backup.env`と同じで、DB名だけをStagingへ置き換える。オフサイト転送(R2)の対象には当面含めず、保持期間は14日とする。
 
 > [!IMPORTANT]
-> Stagingの**Cloudflare資源(DNS CNAME、Tunnel ingress、Access Application/Policy)は2026-10-16にオーナーのY委譲のもとでプロビジョニング済み**です。一方、**`staging.env`・`staging-backup.env`(秘密情報)、systemdユニット配置、DB/ロール作成、復元ドリル、最終検証**は、[GITHUB_POLICY.md](../GITHUB_POLICY.md) §8および[AGENTS.md](../AGENTS.md) §4のHuman Gateとして**オーナーのY/N待ちで未実施**で、オリジンが無いため**Stagingはまだ利用できません**。手順・コマンド・ロールバック・検証チェックリストは[Staging構築手順書](runbooks/staging-bringup.md)にまとめています。`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替え、Stagingユニット未設置の間は当該環境を対象外とします。
+> Stagingの**Cloudflare資源(DNS CNAME、Tunnel ingress、Access Application/Policy)は2026-10-16にオーナーのY委譲のもとでプロビジョニング済み**です(実施結果は[Staging構築手順書](runbooks/staging-bringup.md))。**秘密情報(`staging.env`・`staging-backup.env`)、Staging用DB/ロール、systemdユニット配置、復元ドリル**は[GITHUB_POLICY.md](../GITHUB_POLICY.md) §8および[AGENTS.md](../AGENTS.md) §4のHuman Gateです。**独立リリースへの移行**は、systemdユニットの再配置(WorkingDirectoryの変更)と初回の`bash scripts/deploy-staging.sh`実行を伴うため、同じくオーナーY/Nを得てから実施してください。手順・コマンド・ロールバック・検証チェックリストは[Staging構築手順書](runbooks/staging-bringup.md)にまとめています。`scripts/deploy-local.sh`は本番・MVPだけを切り替え、Stagingには触れません。
 
 ### 1. DB/ロール作成(実施済み)
 
@@ -202,25 +204,46 @@ Tunnel登録、本番/MVPのDNS、MVP Access Applicationは`infra/cloudflare/`�
 
 ### デプロイ(手動)
 
+本番・MVPの反映とStagingの反映は独立している。**本番・MVPは`scripts/deploy-local.sh`、Stagingは`scripts/deploy-staging.sh`**が担当し、互いの作業ツリー・`dist`・`node_modules`・サービスには触れない。リリース候補は先にStagingへ反映して受入確認し、問題なければ本番へ反映する。
+
+#### Stagingの独立デプロイ
+
+Stagingだけを、本番より先にリリース候補commitへ更新する。本番・MVPが使う作業ツリーのgit HEAD・`dist`・`node_modules`は変わらない。
+
+```bash
+bash scripts/deploy-staging.sh                 # origin/main の最新
+bash scripts/deploy-staging.sh <commit-sha>    # 特定のcommit(レビュー済みのリリース候補)
+npm run deploy:staging                         # 上と同じ(origin/main)
+```
+
+1. 対象commitを`~/.local/share/mirai-web-cad/staging-runtime/releases/<sha>/`へ`git archive`で書き出し、そこで`npm ci --ignore-scripts`と`BUILD_COMMIT=<sha> npm run build`(`dist/build-info.json`へ記録)を行う
+2. `~/.config/mirai-web-cad/staging.env`から`DATABASE_URL`を`sed`で**1変数だけ**取り出し(ファイルを`source`しない。値は表示しない)、読み取り専用の`db:check`を実行する。接続先DB名が`mirai_web_cad_staging`でなければ何も切り替えずに中止する。**ここまでに失敗した場合、稼働中のStagingは何も変わらない**
+3. `staging-runtime/current`を`releases/<sha>`へのsymlinkとして原子的に切り替え(`ln -sfn`+`mv -Tf`)、`mirai-web-cad-staging.service`だけを再起動する
+4. `/api/health`で`deploy.distCommit`(と、返る場合は`deploy.commit`)・接続DB名`mirai_web_cad_staging`が対象commitと一致することを確認する。git情報を持たないアーカイブ配信のため、サーバーは`deploy.commit`を`dist/build-info.json`のcommitへフォールバックする
+5. 手順3以降で失敗した場合は`current`を直前の向き先へ戻し、再起動・再検証する(初回デプロイで戻し先が無い場合は`current`を削除してStagingを停止する)
+6. `releases/`は直近3件とロールバック先を残して削除する
+
+#### 本番・MVPのデプロイ
+
 環境変数ファイルを一括で`source`すると、JSON値(`ACCESS_ROLE_MAP`等)の引用符がシェルにより除去され、手動起動時に「ACCESS_ROLE_MAP is not valid JSON」で失敗する。必要な変数だけを`sed`で取り出す(「3. Migration適用」の注意書き参照)。
 
 ```bash
 DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/production.env)" bash scripts/deploy-local.sh
 ```
 
-`scripts/deploy-local.sh`は本番・MVP・Stagingの3系統を一括で切り替える。Stagingは`mirai-web-cad-staging.service`が設置されている場合だけ切替対象となり、未設置の間は本番・MVPの2系統のみを切り替える(Stagingユニット未設置の間も稼働中ツリーは何も変わらない)。
+`scripts/deploy-local.sh`は本番・MVPの2系統だけを切り替える。Stagingは対象外で、`staging.env`も読まない(Stagingユニットが設置されていても触れない)。
 
-2026-09-25〜(独立レビュー H-1)、次の順で行う。本番・MVP・Stagingは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
+2026-09-25〜(独立レビュー H-1)、次の順で行う。本番・MVPは作業ツリーの`dist/`と`node_modules/`をそのまま使うため、稼働中のツリーでは依存導入もbuildもしない。
 
 1. 対象commit(origin/main)を`.releases/<sha>/`へ`git archive`で書き出し、そこで`npm ci --ignore-scripts`と`npm run build`(`BUILD_COMMIT`を`dist/build-info.json`へ記録)を行う
-2. 本番DB・MVP DB(および設置済みならStaging DB)へ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は、ユニットの`EnvironmentFile=`(通常`~/.config/mirai-web-cad/mvp.env`)の`DATABASE_URL`(外側の引用符はsystemdと同じく外す)で、サービスが実際に使うDBと同じものを検証する。対象commitが既に配信中の再デプロイでは、配信中のリリースを消さずに再利用する。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
+2. 本番DB・MVP DBへ読み取り専用の`db:check`を実行する。MVPは`mirai-web-cad-mvp.service`が設置されている場合だけ対象で、接続先は、ユニットの`EnvironmentFile=`(通常`~/.config/mirai-web-cad/mvp.env`)の`DATABASE_URL`(外側の引用符はsystemdと同じく外す)で、サービスが実際に使うDBと同じものを検証する。対象commitが既に配信中の再デプロイでは、配信中のリリースを消さずに再利用する。**ここまでに失敗した場合、稼働中のツリーは何も変わらない**
 3. 作業ツリーをfast-forwardし、`dist`と`node_modules`を`.releases/<sha>/`へのsymlinkとして一度の操作(rename)で切り替える。初回だけ、実体のディレクトリを`.releases/legacy-<直前のcommit>/`へ退避する
-4. 本番・MVP(および設置済みならStaging)を再起動し、各`/api/health`で`deploy.commit`(サーバーのコード)と`deploy.distCommit`(配信物のbuild元)が対象commitと一致することを確認する
+4. 本番・MVPを再起動し、各`/api/health`で`deploy.commit`(サーバーのコード)と`deploy.distCommit`(配信物のbuild元)が対象commitと一致することを確認する
 5. 手順3以降で失敗した場合は、作業ツリー・symlinkを直前の状態へ戻し、各サービスを再起動して直前のcommitで一致することを確認する(ロールバック中は途中の失敗で止めず、各手順の結果を出力する。`build-info.json`を持たない以前の配信物へ戻した場合は、以前のサーバーが`distCommit`を返さないため、healthと稼働commitだけで確認する)
 
 `.releases/`には直近3件のリリース(と直前の向き先)を残す。`npm run deploy:drift -- --url http://127.0.0.1:18812`は、稼働commitと配信物のbuild元の不一致も乖離として報告する。
 
-対象commitでこのスクリプト自体が更新される場合は、何も変更しないうちに新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ。新しい手順に構文エラーがあれば何も変えずに中止)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。
+`scripts/deploy-local.sh`自身が対象commitで更新される場合は、何も変更しないうちに新しい手順で1回だけ自動的に再実行する(ロールバック先は更新前のコミットを引き継ぐ。新しい手順に構文エラーがあれば何も変えずに中止)。bashは起動時点のスクリプトを実行し続けるため、以前は手順の変更が次回デプロイまで反映されなかった(2026-09-25、`db:check`切替の初回デプロイで旧手順の`db:verify`が走った。DB指紋の比較でデータ差異なしを確認済み)。`scripts/deploy-staging.sh`は専用ランタイムを毎回対象commitの`git archive`から構築するため、この再実行の問題は無い。
 
 DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(2026-09-25〜、改善台帳P0-74)。以前の`db:verify`はmigrationと`seeds/demo.sql`を毎デプロイで適用し、デモ行の投入、`dwg_demo_001`の`name`上書きと`visibility='public'`強制、監査トリガのdrop→再作成を本番DBへ起こしていた。
 
@@ -241,7 +264,7 @@ DB検証は読み取り専用の`db:check`で、本番DBへ書き込まない(20
    ```
 
    `MIGRATION_DATABASE_URL`は所有者ロール等の接続文字列(`production.env`とは別に安全に管理し、リポジトリへ置かない)。
-4. 本番DB(`production.env`)とMVP DB(`mvp.env`)の両方で`db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する(`DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/<env>)" npm run db:check`)
+4. 本番DB(`production.env`)とMVP DB(`mvp.env`)の両方で`db:check`が成功することを確認してから`scripts/deploy-local.sh`を実行する(`DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/<env>)" npm run db:check`)。Stagingで先に検証する場合は、`staging.env`のDBに対して`bash scripts/deploy-staging.sh <commit>`が読み取り専用の`db:check`を実行する(Staging DBは使い捨て。migrationの適用後状態を本番反映前に確認できる)
 
 デプロイ後は必ず**稼働commitの素性確認**を行う。
 
@@ -366,6 +389,8 @@ ln -sfn "$rel/dist" .swap-dist && mv -Tf .swap-dist dist
 sudo systemctl restart mirai-web-cad.service mirai-web-cad-mvp.service
 ```
 
+Stagingは本番と独立しているため、Stagingだけを戻す場合は `bash scripts/deploy-staging.sh <直前の正常commit>` を実行する(対象releaseの構築・`current`切替・Stagingサービスの再起動・health検証をまとめて行う)。手動で戻す場合は `~/.local/share/mirai-web-cad/staging-runtime/current` を `releases/<sha>` へ切り替え、`sudo systemctl restart mirai-web-cad-staging.service` の後に`http://127.0.0.1:18814/api/health`で`deploy.distCommit`を確認する。本番・MVPのサービスは再起動しない。
+
 Cloudflare Tunnel/DNSに問題がある場合は、Cloudflare Pages Custom Domainを再アタッチする(Pagesプロジェクト・`functions/`・`wrangler.toml`はロールバック手段として当面残置している)。
 
 ## Cloudflareエッジキャッシュ(リポジトリ外設定、重要)
@@ -393,5 +418,7 @@ curl -sI https://mirai-web-cad.mirai-dx-platform.com/src/app.js | grep -i "cache
 
 - 本番サービスがこのホスト(kensan1969)の稼働に依存する。ホスト停止・ネットワーク断で本番が停止する
 - `mirai-web-cad.service`のsystemdユニットは`IPAddressDeny=any`を採用していない(Cloudflare Access JWKS取得の外向きHTTPSに必要なため)。インバウンド制限は`127.0.0.1`バインドと`RestrictAddressFamilies`で担保している
-- CI(GitHub Actions)からはこのホストへ直接デプロイできないため、デプロイは`scripts/deploy-local.sh`の手動実行に依存する。self-hosted runner化は将来の別Issueとする
+- CI(GitHub Actions)からはこのホストへ直接デプロイできないため、デプロイは`scripts/deploy-local.sh`(本番・MVP)と`scripts/deploy-staging.sh`(Staging)の手動実行に依存する。self-hosted runner化は将来の別Issueとする
+- Stagingは独立ランタイム(`~/.local/share/mirai-web-cad/staging-runtime`)を持つため、本番・MVPの`.releases/`とは世代管理が別になる。Stagingのディスク使用量は`releases/`直近3件+ロールバック先に制限される
+- `mirai-web-cad-staging-monitor.service`などのStaging定期ジョブは本番ツリーのスクリプトを実行するため、監視スクリプトの更新は本番デプロイ後(またはユニットの`WorkingDirectory`変更後)に反映される。Staging本体の独立リリースとは反映タイミングが異なる
 - バックアップのオフサイト転送(R2等)は未実施。保存先・暗号鍵・保持期間・費用・復元責任者の合意が別途必要

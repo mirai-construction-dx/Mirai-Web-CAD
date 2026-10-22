@@ -80,6 +80,7 @@ exit 0`);
   stub(bin, "sudo", `echo "sudo $*" >> "${log}"`);
   // healthは作業ツリーのHEADと、dist(symlinkを辿る)のbuild元を返す。STUB_BREAK_COMMITに一致すれば不健全。
   stub(bin, "curl", `
+echo "curl $*" >> "${log}"
 commit="$(git rev-parse HEAD)"
 dist="$(sed -n 's/.*"commit":"\\([^"]*\\)".*/\\1/p' dist/build-info.json 2>/dev/null)"
 if [[ "$commit" == "\${STUB_BREAK_COMMIT:-none}" ]]; then printf '{"ok":false}'; exit 0; fi
@@ -91,7 +92,7 @@ printf '{"ok":true,"deploy":{"commit":"%s","distCommit":"%s"}}' "$commit" "$dist
     HOME: root,
     DATABASE_URL: "postgresql://stub.invalid/prod"
   };
-  return { work, v1, v2, env, log };
+  return { work, v1, v2, env, log, stagingEnv };
 }
 
 function deploy(work, env) {
@@ -213,47 +214,61 @@ test("rollback to a legacy dist without build-info.json is verified by health an
   }, { legacyBuildInfo: false });
 });
 
-test("staging is verified and its database checked when its unit is installed", () => {
+test("deploy-local.sh does not reference the staging service, port or env", () => {
+  // Stagingは scripts/deploy-staging.sh の独立リリースへ分離した(ADR-0006)。
+  assert.doesNotMatch(script, /mirai-web-cad-staging\.service/);
+  assert.doesNotMatch(script, /18814/);
+  assert.doesNotMatch(script, /staging\.env|STAGING_/);
+});
+
+test("deploy-local never restarts or db-checks staging even when its unit is installed", () => {
   withRepo(({ work, v2, env, log }) => {
     const result = deploy(work, { ...env, STUB_STAGING: "1" });
     assert.equal(result.status, 0, result.output);
-    assert.match(result.output, new RegExp(`デプロイ成功: ${v2}`));
+    assert.equal(git(work, "rev-parse", "HEAD"), v2);
     const recorded = calls(log);
-    // Stagingのユニットが読む環境ファイルの値を、外側の引用符を外して使う。
-    assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/staging$/m);
-    assert.match(recorded, /sudo systemctl restart mirai-web-cad-staging.service/);
-    // Stagingが設置されていても、MVP未設置ならMVPには触れない。
-    assert.doesNotMatch(recorded, /mvp/);
+    // StagingのURL(18814)・サービス・DB検証のいずれにも触れない。
+    assert.doesNotMatch(recorded, /staging|18814/);
+    assert.match(recorded, /db:check postgresql:\/\/stub.invalid\/prod/);
+    assert.equal(recorded.match(/db:check/g)?.length, 1);
+    assert.match(recorded, /sudo systemctl restart mirai-web-cad\.service/);
+    // 本番のhealthだけを確認し、Staging(18814)へは問い合わせない。
+    assert.match(recorded, /curl .*:18812\/api\/health/);
+    assert.doesNotMatch(recorded, /curl .*:18814/);
   });
 });
 
-test("staging is skipped when its unit is not installed", () => {
-  withRepo(({ work, v2, env, log }) => {
-    const result = deploy(work, { ...env, STUB_MVP: "1" });
+test("deploy-local does not depend on staging.env even when the staging unit is installed", () => {
+  withRepo(({ work, v2, env, log, stagingEnv }) => {
+    // Stagingユニットが設置されていても、deploy-localはstaging.envを読まない。
+    rmSync(stagingEnv);
+    const result = deploy(work, { ...env, STUB_STAGING: "1" });
     assert.equal(result.status, 0, result.output);
-    const recorded = calls(log);
-    assert.doesNotMatch(recorded, /staging/);
-    // MVPは設置済みなので従来どおり対象になる。
-    assert.match(recorded, /sudo systemctl restart mirai-web-cad-mvp.service/);
+    assert.equal(git(work, "rev-parse", "HEAD"), v2);
+    assert.doesNotMatch(calls(log), /staging/);
   });
 });
 
-test("a failing staging db:check aborts before anything live changes", () => {
-  withRepo(({ work, v1, env, log }) => {
-    const result = deploy(work, { ...env, STUB_STAGING: "1", STUB_DBCHECK_FAIL: "postgresql://stub.invalid/staging" });
-    assert.notEqual(result.status, 0);
-    assert.equal(git(work, "rev-parse", "HEAD"), v1);
-    assert.ok(!lstatSync(path.join(work, "dist")).isSymbolicLink(), "live dist must stay untouched");
-    assert.doesNotMatch(calls(log), /systemctl restart/);
-  });
-});
-
-test("an unhealthy release rolls staging back too when its unit is installed", () => {
-  withRepo(({ work, v1, v2, env, log }) => {
-    const result = deploy(work, { ...env, STUB_STAGING: "1", STUB_BREAK_COMMIT: v2 });
-    assert.notEqual(result.status, 0);
-    assert.match(result.output, new RegExp(`ロールバック完了: ${v1}`));
-    // 本処理と rollback の両方で、本番とStagingを再起動する。
-    assert.equal(calls(log).match(/restart mirai-web-cad-staging.service/g).length, 2);
+test("deploy-local leaves the staging runtime current untouched", () => {
+  withRepo(({ work, v2, env, log }) => {
+    // Stagingの独立ランタイムを置いても、deploy-localは向き先もreleaseも変更しない。
+    const root = path.dirname(work);
+    const runtime = path.join(root, "staging-runtime");
+    const release = path.join(runtime, "releases/existing");
+    mkdirSync(path.join(release, "dist"), { recursive: true });
+    writeFileSync(path.join(release, "dist/build-info.json"), JSON.stringify({ commit: "existing" }));
+    mkdirSync(runtime, { recursive: true });
+    const current = path.join(runtime, "current");
+    execFileSync("ln", ["-sfn", "releases/existing", current]);
+    const before = readlinkSync(current);
+    const result = deploy(work, { ...env, STUB_STAGING: "1" });
+    assert.equal(result.status, 0, result.output);
+    assert.equal(readlinkSync(current), before);
+    assert.deepEqual(
+      JSON.parse(readFileSync(path.join(release, "dist/build-info.json"), "utf8")),
+      { commit: "existing" }
+    );
+    assert.equal(git(work, "rev-parse", "HEAD"), v2);
+    assert.doesNotMatch(calls(log), /staging/);
   });
 });

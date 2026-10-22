@@ -36,12 +36,13 @@
 
 - systemdユニット定義: `deploy/systemd/mirai-web-cad-staging.service`、`mirai-web-cad-staging-backup.service`/`.timer`、`mirai-web-cad-staging-backup-check.service`/`.timer`、`mirai-web-cad-staging-monitor.service`/`.timer`、`mirai-web-cad-staging-restore-drill.service`/`.timer`
 - 監視スクリプト: `scripts/check-staging-health.sh`（ローカルAPI、接続DB名、公開URLのAccess境界を検査）
-- デプロイスクリプト: `scripts/deploy-local.sh`を本番・MVP・Stagingの**3系統一括切替**へ拡張
+- デプロイスクリプト: `scripts/deploy-staging.sh`（Staging専用ランタイム `~/.local/share/mirai-web-cad/staging-runtime` の `releases/<sha>` へ構築し、`current` symlinkを原子切替してStagingだけを再起動する独立デプロイ）。本番・MVPの`scripts/deploy-local.sh`はStagingに触れない
+- systemdユニットの`WorkingDirectory`は `~/.local/share/mirai-web-cad/staging-runtime/current`（本番ツリーを共有しない）
 - Cloudflare定義: `infra/cloudflare/`のStaging定義（変数化。`enable_management=false`は据え置き、import planが無差分になるまでapplyしない）
-- CI: Staging構成の検査(`scripts/check-staging-config.sh`、CIジョブ「Staging Configuration」。ユニットの存在・必須ディレクティブ・`deploy-local.sh`の18814対応・DB名の一致・本番専用経路へ未配線を検査)
+- CI: Staging構成の検査(`scripts/check-staging-config.sh`、CIジョブ「Staging Configuration」。ユニットの存在・必須ディレクティブ・`WorkingDirectory`・`deploy-staging.sh`の独立ランタイム方式・`deploy-local.sh`がStagingへ触れないこと・DB名の一致・本番専用経路へ未配線を検査)
 - 文書: ADR-0005、本書、[ローカルデプロイ運用メモ](../deployment-local.md)、[運用・復旧メモ](../operations.md)、README、`state.json`
 
-`scripts/deploy-local.sh`は、本番・MVP・Stagingの3系統を一度の操作で切り替えます。ただしStagingのsystemdユニットが設置されていない間は、稼働中ツリーを変更しません（MVPと同じく、未設置の環境は対象外）。
+Stagingは `scripts/deploy-staging.sh [commit]` で**本番から独立して**リリースします（省略時は`origin/main`）。専用ランタイムの`releases/<sha>`へ`git archive`+`npm ci --ignore-scripts`+`BUILD_COMMIT=<sha> npm run build`で構築し、`staging.env`から`DATABASE_URL`を`sed`で1変数だけ取り出して`db:check`を実行、`current`を原子切替して`mirai-web-cad-staging.service`だけを再起動します。本番・MVPの作業ツリー・`dist`・`node_modules`は変更しません。本番への反映は従来どおり`scripts/deploy-local.sh`（本番・MVPの2系統）です。
 
 ## 2. Human Gateの全体像
 
@@ -251,7 +252,7 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/staging.env
 > ```
 
 > [!NOTE]
-> 監視（`mirai-web-cad-staging-monitor.service`）は`WorkingDirectory`の作業ツリーにある`scripts/check-staging-health.sh`を実行します。このスクリプトはmainにのみ存在するため、**作業ツリーが本番反映（`scripts/deploy-local.sh`）で対象commitへ更新されるまで監視は失敗します**（2026-10-16実測: ツリーがmainより14コミット遅れで`exit 127`）。サービス本体（`scripts/serve-production.mjs`）は旧ツリーでも動作します。
+> 監視（`mirai-web-cad-staging-monitor.service`）は`WorkingDirectory`の作業ツリーにある`scripts/check-staging-health.sh`を実行します。Staging本体は独立ランタイムから配信されますが、監視スクリプトは本番ツリー側の更新に追随するため、**本番反映（`scripts/deploy-local.sh`）で対象commitへ更新されるまで監視は失敗します**（2026-10-16実測: ツリーがmainより14コミット遅れで`exit 127`）。監視ユニットの`WorkingDirectory`を独立ランタイムへ移すかは別途判断します。
 
 **コマンド**
 
@@ -269,6 +270,11 @@ sudo install -o root -g root -m 0644 \
   /etc/systemd/system/
 sudo systemctl daemon-reload
 
+# 独立ランタイムのcurrentを作ってからサービスを起動する(currentが無い状態で起動すると
+# WorkingDirectory不在で失敗するため)。deploy-staging.shは対象commitを構築し、
+# currentを切り替えた後、Stagingサービスだけを再起動する(本番・MVPには触れない)。
+bash scripts/deploy-staging.sh
+
 sudo systemctl enable --now mirai-web-cad-staging.service
 sudo systemctl enable --now mirai-web-cad-staging-backup.timer mirai-web-cad-staging-backup-check.timer
 sudo systemctl enable --now mirai-web-cad-staging-monitor.timer
@@ -278,12 +284,18 @@ sudo systemctl enable --now mirai-web-cad-staging-restore-drill.timer
 **期待結果**
 
 - `systemctl status mirai-web-cad-staging.service`が`active`、`journalctl -u mirai-web-cad-staging.service -n 20`にエラーがない
-- `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名が`mirai_web_cad_staging`、`deploy.commit`が配信中のcommitと一致
+- `systemctl show -p WorkingDirectory --value mirai-web-cad-staging.service`が`/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`
+- `readlink ~/.local/share/mirai-web-cad/staging-runtime/current`が`releases/<対象commit SHA>`を指し、その`dist/build-info.json`の`commit`が対象commitと一致する
+- `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、`deploy.distCommit`が対象commitと一致（`deploy.commit`はgit情報の無いアーカイブ配信のため`dist/build-info.json`へフォールバックし、同じ値を返す）。匿名healthは`db.database`を伏せるため、接続DB名は`db:check`または`psql "$DATABASE_URL" -Atqc 'select current_database()'`で`mirai_web_cad_staging`を確認する
 - 4タイマーが`enabled`/`active (waiting)`である
+- `bash scripts/check-staging-readiness.sh`が**exit 0**（全項目OK）である
 
 **ロールバック**
 
 ```bash
+# Stagingだけを直前の正常commitへ戻す(本番・MVPは再起動しない)
+bash scripts/deploy-staging.sh <直前の正常commit SHA>
+
 sudo systemctl disable --now \
   mirai-web-cad-staging-monitor.timer \
   mirai-web-cad-staging-restore-drill.timer \
@@ -293,6 +305,17 @@ sudo systemctl disable --now mirai-web-cad-staging.service
 sudo rm /etc/systemd/system/mirai-web-cad-staging*.service /etc/systemd/system/mirai-web-cad-staging*.timer
 sudo systemctl daemon-reload
 ```
+
+### 共有worktreeからの独立リリース移行（既存環境のみ）
+
+2026-10-16時点の構築では、Stagingは本番と同じworktreeの`dist`/`node_modules`から配信していました。本PR以降は独立ランタイムへ移行します。既存環境では**ユニット再配置（`WorkingDirectory`変更）と初回`deploy-staging.sh`実行**が必要で、systemd設定の変更にあたるためHuman GateとしてオーナーのY/Nを得てから実施します。
+
+1. PRマージ後、本番反映（`scripts/deploy-local.sh`、Human Gate）で本番worktreeへ`scripts/deploy-staging.sh`を反映する
+2. 本番worktreeで上記「Human Gate 5」の`sudo install`と`sudo systemctl daemon-reload`を実行する（この時点では稼働中プロセスは旧worktreeのまま動き続ける）
+3. `bash scripts/deploy-staging.sh`を実行する。専用ランタイムの構築・`current`切替・Stagingのみの再起動・health検証まで行う
+4. `bash scripts/check-staging-readiness.sh`がexit 0であること、本番・MVPの`/api/health`が変わっていないことを確認する
+
+失敗した場合、`deploy-staging.sh`は自動で`current`を直前へ戻します。初回で戻し先が無い場合は`current`を削除してStagingを停止します（本番・MVPには影響しません）。旧ユニットへ戻す場合は`WorkingDirectory`を本番worktreeへ戻して`daemon-reload`し、Stagingサービスを再起動します（切り戻しもHuman Gate）。
 
 ## 8. Human Gate 6: 復元ドリルの初回実行
 
@@ -344,15 +367,16 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 
 ## 10. 検証チェックリスト
 
-すべて満たした場合にのみ「Staging構築完了」とします。2026-10-16にオーナーの認可「私が全部実行する」のもとCTOが**Human Gate 3〜6を実施**し、**Gate 7も一部（Readiness全項目OK、公開URL 302、本番/MVP不変）まで完了**しました。**残るのは`mirai-web-cad-staging-monitor.service`（本番デプロイ待ち）と、Access Service Tokenを使う`npm run test:e2e:staging`（オーナー実施）のみ**です。
+すべて満たした場合にのみ「Staging構築完了」とします。2026-10-16にオーナーの認可「私が全部実行する」のもとCTOが**Human Gate 3〜6を実施**し、**Gate 7も一部（Readiness全項目OK、公開URL 302、本番/MVP不変）まで完了**しました。**残るのは`mirai-web-cad-staging-monitor.service`（本番デプロイ待ち）と、Access Service Tokenを使う`npm run test:e2e:staging`（オーナー実施）のみ**です。2026-10-23以降は、Stagingを本番から独立したランタイムでリリースする構成へ移行するため、下記の独立リリース項目も満たす必要があります（ホスト反映はHuman Gate）。
 
-- [x] ローカルhealth: `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名`mirai_web_cad_staging`、`auth.mode: access`。配信中commitは`11db0b8`（共有worktreeの`scripts/serve-production.mjs`が配信。worktreeは`main`より14コミット遅れ）（**2026-10-16のGate 3〜5で達成済み**）
+- [x] ローカルhealth: `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名`mirai_web_cad_staging`、`auth.mode: access`。配信中commitは`11db0b8`（独立リリース移行前の2026-10-16時点。共有worktreeの`scripts/serve-production.mjs`が配信し、worktreeは`main`より14コミット遅れ）（**2026-10-16のGate 3〜5で達成済み**）
 - [x] DB名: `staging.env`の`DATABASE_URL`のDB名が`mirai_web_cad_staging`、`staging-backup.env`の`RESTORE_DATABASE_URL`のDB名が`mirai_web_cad_staging_recovery`（**2026-10-16のGate 3・4で達成済み**）
 - [x] `npm run db:verify`がStaging envで成功し、`tables=9 seed=1`（**2026-10-16のGate 4で達成済み**。`db:check`も同envで成功）
 - [x] 公開URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`が未認証でAccessログインへ302。bypass policyが存在せず、許可は`kensan1969@gmail.com`のみ（**2026-10-16のGate 1・2で達成済み**）
 - [x] 本番・MVPへ影響なし: `curl -fsS http://127.0.0.1:18812/api/health`と`http://127.0.0.1:18813/api/health`が変更なく成功し、本番・MVPの公開URLが従来どおり動作する（2026-10-16実測: 本番`/api/health`=200、MVP`/`=302で不変。Tunnel再起動時の短時間中断は解消済み）
 - [x] タイマー: backup/backup-check/monitor/restore-drillの4タイマーが`enabled`かつ`active (waiting)`（**2026-10-16のGate 5で達成済み**）
-- [ ] ジョブ初回成功: バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は成功済み。**監視（`mirai-web-cad-staging-monitor.service`）は`exit 127`で未成功**。共有worktree（配信中`11db0b8`）にmainにのみ存在する`scripts/check-staging-health.sh`が無いためで、worktreeが通常の本番デプロイ（`scripts/deploy-local.sh`、Human Gate）でmainへ更新されると動作する（Issue #162で追跡中・open）
+- [ ] 独立リリース: `systemctl show -p WorkingDirectory --value mirai-web-cad-staging.service`が`/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`、`readlink ~/.local/share/mirai-web-cad/staging-runtime/current`が`releases/<対象commit>`、`/api/health`の`deploy.distCommit`が対象commitと一致する。`bash scripts/check-staging-readiness.sh`がexit 0。`scripts/deploy-local.sh`実行後もStagingの`current`が変わらない（§7「共有worktreeからの独立リリース移行」を参照。ホスト反映はHuman Gate）
+- [ ] ジョブ初回成功: バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は成功済み。**監視（`mirai-web-cad-staging-monitor.service`）は`exit 127`で未成功**。共有worktree（配信中`11db0b8`）にmainにのみ存在する`scripts/check-staging-health.sh`が無いためで、worktreeが通常の本番デプロイ（`scripts/deploy-local.sh`、Human Gate）でmainへ更新されると動作する（Issue #162で追跡中・open）。独立リリース移行後も監視ユニットは本番ツリーを参照するため、監視スクリプトの更新は本番デプロイ後に反映される
 - [x] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した（Gate 1・2の実施内容は§3・§4と`state.json`へ記録済み。Gate 3〜7の実施記録は通知Issue #163・#164を証跡付きでclose済み、監視の未完のみ#162としてopenで継続）
 - [ ] `npm run test:e2e:staging`（Access Service TokenでStaging公開URLを認証してdesktop/mobileを検証）: **オーナー実施待ち**。テスト専用のService Tokenをローカルで作成し、テスト直後にpolicyとtokenの両方を削除する必要がある（値はGit・ログ・チャットへ出さない。§12参照）。2026-10-16時点では未実施
 
@@ -362,6 +386,7 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 
 - Stagingは専用DB`mirai_web_cad_staging`のみを読み書きし、本番・MVPのDBへ接続しない（`db:check`の接続DB名とhealthで検証）
 - 本番・MVPと別のsystemdユニット・別のenvファイル・別のバックアップディレクトリを持つ
+- Stagingは本番・MVPと別のランタイム（`~/.local/share/mirai-web-cad/staging-runtime`、`releases/<sha>`+`current`）を持ち、Stagingの反映は`scripts/deploy-staging.sh`だけが行う。本番・MVPの`scripts/deploy-local.sh`はStagingの`dist`/`node_modules`/サービスに触れない
 - Stagingからの本番データ参照は行わない。実データ形状が必要な場合は`seeds/demo.sql`または合成データを使う
 - 本番・MVPのDNS/Access/Ruleset設定を変更しない。Terraformの`enable_management`は`false`を維持し、import planが無差分になるまでapplyしない
 - Stagingのバックアップ保持期間は14日。オフサイト転送（R2）の対象には当面含めない（本番・MVPのみ）
@@ -372,10 +397,10 @@ Human Gate 1〜7を進める前後で、次の2つを何度でも繰り返し実
 
 | コマンド | 用途 | 期待結果 |
 | --- | --- | --- |
-| `bash scripts/check-staging-readiness.sh` | ホストの現状（ユニットの設置・enable・active、envファイルの存在と`0600`、アプリDB/隔離DBの存在、ローカルhealth（18814）、公開URLのAccess境界、`deploy-local.sh`のStaging対応）を項目ごとに`[OK]`/`[FAIL]`で報告する | 未構築の間は「Staging環境は未構築です」を表示して**exit 0**。構築を始めた後に必須項目が欠けている場合だけ**exit 1** |
+| `bash scripts/check-staging-readiness.sh` | ホストの現状（ユニットの設置・enable・active・`WorkingDirectory`、envファイルの存在と`0600`、アプリDB/隔離DBの存在、ローカルhealth（18814）、公開URLのAccess境界、`deploy-staging.sh`と`staging-runtime/current`）を項目ごとに`[OK]`/`[FAIL]`で報告する | 未構築の間は「Staging環境は未構築です」を表示して**exit 0**。構築を始めた後に必須項目が欠けている場合だけ**exit 1** |
 | `E2E_CF_ACCESS_CLIENT_ID=... E2E_CF_ACCESS_CLIENT_SECRET=... npm run test:e2e:staging` | Access Service TokenでStaging公開URLを認証し、desktop/mobileの主要画面を検証する | 全ケース成功でexit 0 |
 
-`scripts/check-staging-readiness.sh`は秘密値を出力しません。envファイルの確認もキー名（`grep -o '^[A-Z_]*='`）だけを表示し、値は画面に出しません。接続先は環境ファイルを`source`せず、`deploy-local.sh`と同じく`sed`で必要な1変数だけを取り出します。
+`scripts/check-staging-readiness.sh`は秘密値を出力しません。envファイルの確認もキー名（`grep -o '^[A-Z_]*='`）だけを表示し、値は画面に出しません。接続先は環境ファイルを`source`せず、`deploy-staging.sh`と同じく`sed`で必要な1変数だけを取り出します。
 
 ### Access Service Tokenを使うE2Eの手順（テスト時のみ）
 
