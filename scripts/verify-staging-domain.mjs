@@ -1,18 +1,34 @@
 import { chromium } from "playwright";
 
-const baseUrl = process.env.E2E_BASE_URL ?? "https://mirai-web-cad-stg.mirai-dx-platform.com";
+// StagingのE2E。2つのモードがある。
+//   (既定) 公開URL + Cloudflare Access Service Token。トークンが無ければ exit 78。
+//   --local  http://127.0.0.1:18814 を直接検証する。トークン不要。書込みは行わない。
+// 追加の環境変数:
+//   E2E_EXPECT_COMMIT  指定すると /api/health の deploy.commit / deploy.distCommit と照合する。
+//   E2E_BASE_URL       検証対象URL(既定: 公開Staging URL、--local時は 127.0.0.1:18814)。
+//
+// Access Service Tokenはエッジ(302の壁)を通過してもユーザーJWTを持たないため、アプリは
+// fail-closedで401を返す(想定どおり)。200のときだけDBプローブを検証し、401は
+// 「正しく拒否している」証跡として記録する。編集操作は、ユーザーJWTが無いため行わない。
+const args = new Set(process.argv.slice(2));
+const local = args.has("--local") || process.env.E2E_STAGING_LOCAL === "1";
+const readOnly = local || args.has("--read-only") || process.env.E2E_STAGING_READ_ONLY === "1";
+const baseUrl = process.env.E2E_BASE_URL ?? (local ? "http://127.0.0.1:18814" : "https://mirai-web-cad-stg.mirai-dx-platform.com");
+const expectCommit = process.env.E2E_EXPECT_COMMIT ?? null;
 const clientId = process.env.E2E_CF_ACCESS_CLIENT_ID;
 const clientSecret = process.env.E2E_CF_ACCESS_CLIENT_SECRET;
 
-if (!clientId || !clientSecret) {
-  console.error("E2E_CF_ACCESS_CLIENT_ID と E2E_CF_ACCESS_CLIENT_SECRET が必要です。");
+if (!local && (!clientId || !clientSecret)) {
+  console.error("E2E_CF_ACCESS_CLIENT_ID と E2E_CF_ACCESS_CLIENT_SECRET が必要です。ローカル検証は --local を付けてください。");
   process.exit(78);
 }
 
-const headers = {
-  "CF-Access-Client-Id": clientId,
-  "CF-Access-Client-Secret": clientSecret
-};
+const headers = local
+  ? {}
+  : {
+      "CF-Access-Client-Id": clientId,
+      "CF-Access-Client-Secret": clientSecret
+    };
 const results = [];
 const browser = await chromium.launch({ headless: true });
 
@@ -43,11 +59,9 @@ try {
       const response = await fetch("/api/health");
       return { status: response.status, body: await response.json().catch(() => null) };
     });
-    // AUTH_MODE=accessでは実利用者のAccess JWTがある場合だけAPIを利用できる。Access Service Tokenは
-    // エッジ(302の壁)を通過してもユーザーJWTを持たないため、アプリは fail-closed で401を返す(想定どおり)。
-    // 200のときだけDBプローブを検証し、401は「正しく拒否している」証跡として記録する。
-    // 接続DB名の一致は check-staging-readiness.sh(psql) と unit の EXPECTED_DATABASE で検証する。
-    if (health.status !== 200 && health.status !== 401) {
+    // --local はアプリへ直接到達するため200が正常。公開URL + Service Tokenは401が正常。
+    const expectedStatuses = local ? [200] : [200, 401];
+    if (!expectedStatuses.includes(health.status)) {
       throw new Error(`${target.name}: /api/health が想定外のステータスです(status=${health.status})`);
     }
     const apiAccessible = health.status === 200;
@@ -55,9 +69,16 @@ try {
     if (apiAccessible && (dbProbe?.provider !== "postgres" || dbProbe?.mode !== "connected" || dbProbe?.migrated !== true)) {
       throw new Error(`${target.name}: Staging DB healthが不正です。`);
     }
+    if (expectCommit && apiAccessible) {
+      const deployed = health.body?.deploy ?? {};
+      const actual = deployed.distCommit ?? deployed.commit;
+      if (actual !== expectCommit) {
+        throw new Error(`${target.name}: 配信commitが一致しません(expected=${expectCommit}, actual=${actual ?? "null"})`);
+      }
+    }
 
     let drawingName = null;
-    if (target.edit && apiAccessible) {
+    if (target.edit && apiAccessible && !readOnly) {
       drawingName = `Cloudflare Staging E2E ${Date.now()}`;
       await page.getByRole("button", { name: "新規図面" }).click();
       const dialog = page.getByRole("dialog", { name: "新規図面" });
@@ -74,14 +95,24 @@ try {
       await waitForText(page.locator(".save-status"), "サーバー同期済み", "desktop: server sync");
     }
 
-    results.push({ target: target.name, paintedPixels, apiStatus: health.status, apiAccessible, dbProvider: dbProbe?.provider ?? null, dbMode: dbProbe?.mode ?? null, drawingName });
+    results.push({
+      target: target.name,
+      mode: local ? "local" : "public-access-token",
+      paintedPixels,
+      apiStatus: health.status,
+      apiAccessible,
+      dbProvider: dbProbe?.provider ?? null,
+      dbMode: dbProbe?.mode ?? null,
+      deployedCommit: health.body?.deploy?.distCommit ?? health.body?.deploy?.commit ?? null,
+      drawingName
+    });
     await context.close();
   }
 } finally {
   await browser.close();
 }
 
-console.log(JSON.stringify({ ok: true, baseUrl, results }, null, 2));
+console.log(JSON.stringify({ ok: true, baseUrl, mode: local ? "local" : "public-access-token", results }, null, 2));
 
 async function assertVisible(locator, label) {
   try {
