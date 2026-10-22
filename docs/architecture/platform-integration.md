@@ -39,7 +39,7 @@
 | 案件IDはMCIPが発番 | 不整合(将来) | `migrations/0001`の独自`projects`と`0007`の`project_members` |
 | 確定版をCDEへ登録 | 未対応 | CDE連携なし。承認済み版はWeb-CAD内で保持 |
 | UI→Agent→Tool→DBまで相関IDを維持 | 一部 | APIは`x-request-id`を受け取り応答へ返す(`src/api-handler.js`)。監査・AI Runへの保存と下流への伝搬は未対応 |
-| 証跡の共通項目(Core evidence schema) | 一部 | 対応表は§4 |
+| 証跡の共通項目(Core evidence schema) | 一部(射影アダプタ実装済み・Core schema非準拠) | 射影アダプタ(`src/core-evidence.js`、PR #178)は実装済みだが、`source_system`の制約と必須項目の欠落で非準拠。対応表は§4、詳細は[core-evidence-export.md](core-evidence-export.md) |
 | 技術標準(OS・アプリ選定 V3.5) | 承認済み例外・更新計画あり | PostgreSQL 16、Node 22(CI)/`engines >=20`、vanilla JS、実行時にNode APIを使用。[ADR-0004](../adr/ADR-0004-tech-stack-vs-os-selection.md)(承認済み: アプリ構成は例外として維持、Node 24へ2027-01-31・PostgreSQL 18へ2027-11-30までに更新) |
 | SSOはEntra ID → Cloudflare Access | 一部 | Cloudflare Accessは稼働。Entra連携の実装(`src/entra-graph.js`)はあるが対象利用者のtenant登録は未完了(台帳§2) |
 
@@ -59,24 +59,31 @@
 
 ## 4. 監査・AI実行記録とCore evidence schemaの対応(現状)
 
-Core `schemas/evidence/ai-run.schema.json`(`core.evidence.ai_run/1`)・`schemas/event/envelope.schema.json`(`core.event.envelope/1`)・`schemas/evidence/citation.schema.json`(`core.evidence.citation/1`)の必須項目に対する、Web-CADのDB列(`migrations/0001`ほか)の対応。Release `v0.8.0`の`contracts.tar.gz`を展開して`$id`と`required`を確認した(2026-10-23)。変換処理は未実装で、将来MCIPへ証跡を送る際の差分を示す。
+Core `schemas/evidence/ai-run.schema.json`(`core.evidence.ai_run/1`)・`schemas/event/envelope.schema.json`(`core.event.envelope/1`)・`schemas/evidence/citation.schema.json`(`core.evidence.citation/1`)の必須項目に対する、Web-CADのDB列(`migrations/0001`ほか)の対応。Release `v0.8.0`の`contracts.tar.gz`を展開して`$id`と`required`を確認した(2026-10-23)。**射影アダプタは実装済み**(`src/core-evidence.js`・読み取り専用CLI `scripts/export-core-evidence.mjs`、PR #178)。ただしCore `ai_run/1`の`source_system`が`const "mcah"`のため、Web-CADの`source_system: "web-cad"`は**Core schema非準拠**である(`schema: null`、`schema_status: "unsupported"`)。**MCIP等への送信と`core-lock/`は未実施**。実装の詳細・出力例・未対応項目は[core-evidence-export.md](core-evidence-export.md)を参照。
 
 `ai-run`の必須項目は`schema` / `event_id` / `source_system` / `run_id` / `request_id` / `project_id` / `requester_oid` / `skill` / `status` / `citations` / `verification` / `policy` / `models` / `usage` / `deployment` / `created_at`。`envelope`は`schema` / `specversion` / `id` / `source` / `type` / `time` / `data`。
 
-| Core必須項目 | Web-CADの対応 | 状態 |
+| Core必須項目 | Web-CADの対応(実装) | 状態 |
 | --- | --- | --- |
-| `schema` | 固定値(`core.evidence.ai_run/1`等)を出す変換は未実装 | 未対応 |
-| `source_system` | `web-cad`(2026-09-25決定、Core PR #27で登録済み)。証跡への出力・変換は未実装 | 未対応(値は確定) |
-| `event_id` / envelope `id` | `audit_logs.id`、`agent_runs.id` | 対応可 |
-| `run_id` | `agent_runs.id` | 対応可 |
-| `request_id` / `correlation_id` | APIの`x-request-id`はDBへ保存していない | 未対応 |
-| `project_id` | `drawings.project_id`(独自の案件ID。MCIP発番ではない) | 一部 |
-| `requester_oid` | `audit_logs.actor_id`、`agent_runs.created_by`(メール/ロール。Entra OIDではない) | 一部 |
-| `status` / `created_at` / envelope `time` | `agent_runs.status`(received〜rolled_backの10状態)、`created_at` | 対応可(状態名の対応付けは要定義) |
-| `skill` | `agent_runs.skill_id`、`skill_version` | 対応可 |
-| `policy` | 承認・ポリシー判定の記録が無い(ADR-0003の移行で扱う) | 未対応 |
-| `verification` / `citations` | 検証結果・引用の記録が無い(文書系の引用は`citation.schema.json`の必須8項目) | 未対応 |
-| `models` / `usage` / `deployment` | `agent_runs.proposal`にengine程度のみ | 未対応(ADR-0003の移行で扱う) |
+| `schema` | 常に`null`+`schema_target: core.evidence.ai_run/1`。Core schemaを採用したと偽らない | 実装済み(**非準拠**) |
+| `source_system` | `"web-cad"`を出力。Core `ai_run/1`は`const "mcah"`のため構造的不適合 | 実装済み(**非準拠**) |
+| `event_id` / envelope `id` | `audit_logs.id`/`agent_runs.id`から決定的UUIDv7を導出(同じ行は同じID) | 実装済み(derived) |
+| `run_id` | `agent_runs.id`は`run_<12hex>`でUUIDv7でないため`null`。元IDは`source.id`に保持 | 未対応(形式不一致) |
+| `request_id` | APIの`x-request-id`はDBへ未保存のため`null` | 未対応 |
+| `correlation_id`(envelope任意) | 未保存のため`null` | 未対応 |
+| `project_id` | `drawings.project_id`は`prj_…`形式・自採番でCoreの`^[A-Z]…`に合わないため`null`。元値は`source.project_id`に保持 | 未対応(形式・発番主体) |
+| `requester_oid` | `audit_logs.actor_id`/`agent_runs.created_by`はメールであり得る。UUID形式のみ写像し、それ以外は出力しない(`redacted`)。CLIは`actor_id`をSELECTしない | 一部(redacted/unsupported) |
+| `status` | `agent_runs.status`10状態のうち6状態を写像(completed/failed/rejected/rolled_back/planned→awaiting_approval/previewed→awaiting_approval)。残り4は`null` | 一部(mapped/unsupported) |
+| `created_at` / envelope `time` | `created_at`(timestamptz)をUTCミリ秒`Z`へ正規化 | 実装済み(mapped) |
+| `skill` | `skill_id`/`skill_version`はCoreの`r0-…`/tier形式でないため`null`。元値は`source.skill` | 未対応(形式不一致) |
+| `policy` | 承認・ポリシー判定の記録が無く`null`(ADR-0003の移行で扱う) | 未対応 |
+| `verification` | 検証結果の記録が無く`null` | 未対応 |
+| `citations` | 引用の記録が無く`null`(文書系は`citation.schema.json`の必須8項目) | 未対応 |
+| `models` | `proposal`のengine/provider/modelは`route/via/fallback/model_version`が欠け`null`。元値は`source.models` | 未対応(欠落項目) |
+| `usage` | トークン・原価の計測が無く`null` | 未対応 |
+| `deployment` | Web-CADはCoreのデプロイではなく、`profile/image_digest/core_version`が無いため`null` | 未対応 |
+| envelope全体(`--envelope`) | 封筒`core.event.envelope/1`の必須項目は満たす(`id`導出UUIDv7・`time`正規化・`type: evidence.recorded`)。`data`は上記の非準拠射影 | 一部(封筒のみ準拠) |
+| 追加フィールド | `schema_target`/`*_status`/`source`/`unsupported`を付与。Core schemaは`additionalProperties: true` | 実装済み |
 
 ## 5. 本リポジトリ内で実施済み・今後の対応
 
@@ -85,7 +92,7 @@ Core `schemas/evidence/ai-run.schema.json`(`core.evidence.ai_run/1`)・`schemas/
 
 ## 6. 他Repository連携の2026-10-23実測とStaging環境の位置付け
 
-Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しいリポジトリ間結合を追加しない**。上記「許可する接続は原則4種類」の枠内に留まり、接続形態は本番・MVPと同一である。2026-10-23時点でStagingは稼働しており(§6.8)、その事実はPortfolio catalogへ別途登録する(PORT-OPS-007)。
+Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しいリポジトリ間結合を追加しない**。上記「許可する接続は原則4種類」の枠内に留まり、接続形態は本番・MVPと同一である。2026-10-23時点でStagingは稼働しており(§6.8)、その事実はPortfolio catalogへ別途登録する(PORT-OPS-009)。
 
 ### 6.1 実測の条件
 
@@ -143,7 +150,7 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 | web-cadのdeployments | **Pages本番のみ**(`platform: pages`、`evidence: observed`)。Tunnel/systemdの本番・MVP・Stagingは未登録 | `catalog/repositories.yaml:68`(origin/main `76a310b`) |
 | relationships | `mcip`(mcp_tool_gateway)と`mcah`(runtime_api)がいずれも`designed` | 同`:70-71` |
 | Staging登録の前例 | PORT-OPS-002(CEOS)/005(CivilPDF)/006(CDE)が「実測→`deployments`へ`observed`追加→`source_documents`へ記録追加」の形式 | `docs/operations/PORT-OPS-006_Staging環境連携の実測登録（Civil-Docs-Platform）.md` |
-| web-cadのStaging登録 | **未登録**(2026-10-23時点) | 同catalog。本監査の別タスクでPORT-OPS-007として登録する |
+| web-cadのStaging登録 | **未登録**(2026-10-23時点) | 同catalog。本監査の別タスクでPORT-OPS-009として登録する |
 
 **結論**: Portfolioのweb-cadエントリはPages本番のみで、実態(systemd+Cloudflare Tunnelの本番/MVP/Staging)と乖離している。Stagingの登録はPortfolio側の作業(task-3)で行う。設計上のrelationships(mcip/mcah)は実装が無いため`designed`のままとし、`observed`へ上げない。
 
@@ -165,8 +172,8 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 
 | 区分 | 連携 | 状態・根拠 |
 | --- | --- | --- |
-| **次に実装可能**(外部入力不要) | Core evidence形式への変換(エクスポート) | Core `v0.8.0`の`schemas/evidence/ai-run.schema.json`(`core.evidence.ai_run/1`)等はRelease assetで内容を確認できる。**送信はせず**、自DBの読み取りからJSON Linesを生成する変換・試験は本リポジトリだけで実装できる(§4の差分を埋める)。ただし契約の**取込み・lock固定**は署名済みRelease待ちであり、変換の正本性は未保証 |
-| 同上 | 連携状況の記録(`integration status`) | CDPの`docs/operations/integration-status.md`と同じ形式で、Web-CADが実測した接続状態を自リポジトリに記録できる。他システムへの接続を伴わない |
+| **実装済み**(外部入力不要) | Core evidence形式への射影(エクスポート) | **射影アダプタを実装済み**(`src/core-evidence.js`・`scripts/export-core-evidence.mjs`、PR #178)。送信はせず、自DBの読み取りからJSON Linesを生成できる。ただしCore `ai_run/1`の`source_system`が`const "mcah"`のため**schema非準拠**(`schema: null`/`schema_status: "unsupported"`)。契約の取込み・lock固定・送信は、Coreのconsumer別evidence schema(または`source_system`制約の緩和)と署名付きRelease待ち(§4・[core-evidence-export.md](core-evidence-export.md)) |
+| **次に実装可能**(外部入力不要) | 連携状況の記録(`integration status`) | CDPの`docs/operations/integration-status.md`と同じ形式で、Web-CADが実測した接続状態を自リポジトリに記録できる。他システムへの接続を伴わない |
 | 同上 | 相関ID(`x-request-id`)の保存・伝搬 | `src/api-handler.js`は受け取って応答へ返すが、監査・AI Runへ保存していない(§2)。自DBのadditive migrationで実装可能 |
 | 同上 | 自環境の監視・Stagingの観測記録 | systemd timer・health・DB名の確認は実装済み(§6.8) |
 | **外部入力待ち** | Core成果物の取込み(`core-lock/`)と版宣言 | 署名・attestation付きReleaseが無い(`signing-keys.yaml`空、`/attestations`404)。条件: Coreが署名鍵(O-16)とattestationを有効化し、署名検証できるReleaseを公開する |
@@ -181,6 +188,7 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 
 ### 6.8 Stagingが変えないこと(2026-10-23時点の稼働を含む)
 
+- Stagingのリリースチャネルは[ADR-0006](../adr/ADR-0006-staging-independent-release-channel.md)(2026-10-23承認)で本番・MVPから独立させる決定である。実装(`deploy-staging.sh`)・ホストへの適用は2026-10-23時点で**未確認**。
 - Stagingは稼働中だが、**新しいリポジトリ間結合を追加しない**。`mirai-web-cad-staging.service`(`127.0.0.1:18814`、DB `mirai_web_cad_staging`)は本番・MVPと同じTunnel/Accessの家族パターンで、他システムへ接続しない。
 - 2026-10-23の実測: `mirai-web-cad-staging.service`はactive、`/api/health`は`ok=true`/`db.mode=connected`、DBは`mirai_web_cad_staging`、公開URLは未認証302(Accessログイン)、`mirai-web-cad-staging-monitor.service`は`success`(08:17:33のログに`database=mirai_web_cad_staging, Access redirect required=yes`)、backup/backup-check/restore-drillの各timerはenabledで直近実行はsuccess(復元ドリルは2026-10-18)。
 - AI Providerの直接呼出し([ADR-0003](../adr/ADR-0003-ai-provider-direct-call-interim.md)の期限付き例外)は本番と同じくStagingでも継続し、新しい経路を作らない。Model Gateway(MCAH)への移行時に本番と同時に切り替える。
@@ -191,9 +199,10 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 ### 6.9 未確認として残す事項
 
 - Coreの署名・attestation有効化の時期と、O-16(署名プロバイダー)の決定。2026-10-23時点では`signing-keys.yaml`が空で、Releaseに署名が無いことだけを実測した。
+- Core `ai_run/1`の`source_system: const "mcah"`をどう扱うか(consumer別evidence schemaの新設、制約の緩和、Web-CAD向けschemaの追加)。2026-10-23時点では射影は`schema: null`/`schema_status: "unsupported"`のまま(§4)。
 - MCIPの対外案件ID APIの発番形式・認可方式・提供時期。文書上の「未実装」を確認しただけで、実装計画は未確認。
 - CDEの承認済み版登録の受入設計(API・認証・データ形式)。CDE側の設計文書にはWeb-CAD向けの記載が無い。
 - CDE Stagingの公開疎通(DNS・connector・Accessログイン)。ローカルのhealthとコンテナ稼働だけを実測した。
-- Portfolio Pages本番(`mirai-web-cad.pages.dev`)が現在も配信されているか。catalogのPagesエントリは履歴として残し、現在の配信はTunnel側とする(PORT-OPS-007)。
+- Portfolio Pages本番(`mirai-web-cad.pages.dev`)が現在も配信されているか。catalogのPagesエントリは履歴として残し、現在の配信はTunnel側とする(PORT-OPS-009)。
 - Staging E2E(`npm run test:e2e:staging`)。Access Service Tokenがオーナー実施のため未実施。
 - ArcSphereの後継連携(Mirai-Web-CADのAPI/MCP公開後)の時期と契約。凍結文書の記載のみで、実装は無い。

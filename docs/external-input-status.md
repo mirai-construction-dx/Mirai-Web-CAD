@@ -99,7 +99,7 @@
 - Entra: tenant内の対象UPN、グループGUID対応、Secret運用責任者、当番/SLA台帳の参照IDが確定
 - Phase 0: 許諾済みDXFの保管場所とUAT参加者台帳の参照IDが確定
 - 基盤整合: 8件とも決定済み(2026-09-25)。2026-10-23の再実測で、1(Platform-Infra台帳)は登録済み、6は署名付きRelease待ち、7はMCIP/CDEのAPI待ちであることを確認した。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7・9の契機の到来を追跡する
-- Core: 署名鍵(O-16)とattestationが有効なReleaseが公開されたら、`SHA256SUMS`と署名を照合し、`core-lock/`で版固定して`mhc verify`を通す
+- Core: **consumer別evidence schema(または`source_system`制約の緩和)** と、署名鍵(O-16)・attestationが有効な**署名付きRelease**が提供されたら、`src/core-evidence.js`の`schema`を確定し、`SHA256SUMS`と署名を照合して`core-lock/`で版固定し、`mhc verify`を通す。あわせてMCIP等への送信可否を決める(2026-10-23時点は射影のみ実装済み・非準拠・送信なし)
 - MCIP: 対外案件IDの発番・配布APIが提供されたら、`project_id`の外部ID列をadditive migrationで追加し、読み取り・照合を実装する
 - CDE: Web-CADの承認済み版を受けるAPI・認証・受入形式が提供されたら、登録アダプタを実装する
 - Staging: Access Service Tokenを使うE2Eをオーナーが実施し、結果を記録する
