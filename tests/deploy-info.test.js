@@ -1,14 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEPLOY_PROVENANCE,
   classifyDeployProvenance,
   evaluateDeployProvenance,
+  readBuildInfoCommit,
   readCommitCounts,
-  readDeployInfo
+  readDeployInfo,
+  resolveDeployCommit
 } from "../scripts/lib/deploy-info.mjs";
 import { handleApiRequest } from "../src/api-handler.js";
 
@@ -30,6 +34,20 @@ function fakeGit(table) {
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const MAIN = "fedcba9876543210fedcba9876543210fedcba98";
+
+// dist/build-info.json を持つ一時ディレクトリでテストする(リポジトリのdistに依存しない)。
+function withDist(buildInfo, fn) {
+  const root = mkdtempSync(path.join(tmpdir(), "deploy-info-"));
+  try {
+    if (buildInfo !== undefined) {
+      mkdirSync(path.join(root, "dist"), { recursive: true });
+      writeFileSync(path.join(root, "dist/build-info.json"), typeof buildInfo === "string" ? buildInfo : JSON.stringify(buildInfo));
+    }
+    fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 test("readDeployInfo は commit/branch/未コミット有無/origin_main を読み取る", () => {
   const info = readDeployInfo({
@@ -81,6 +99,53 @@ test("readDeployInfo は origin/main 参照が無くても commit 自体は返�
   });
   assert.equal(info.commit, HEAD);
   assert.equal(info.originMain, null);
+});
+
+test("readBuildInfoCommit は配信物の build 元 commit を読む(git 情報の無いアーカイブ配信用)", () => {
+  withDist({ commit: HEAD, builtAt: "2026-10-23T00:00:00.000Z" }, (root) => {
+    assert.equal(readBuildInfoCommit({ distRoot: path.join(root, "dist") }), HEAD);
+    assert.equal(readBuildInfoCommit({ cwd: root }), HEAD);
+  });
+});
+
+test("readBuildInfoCommit は欠落・壊れた build-info.json で null を返し例外を投げない", () => {
+  withDist(undefined, (root) => {
+    assert.equal(readBuildInfoCommit({ cwd: root }), null);
+  });
+  withDist("{ broken json", (root) => {
+    assert.equal(readBuildInfoCommit({ cwd: root }), null);
+  });
+  withDist({ commit: null }, (root) => {
+    assert.equal(readBuildInfoCommit({ cwd: root }), null);
+  });
+});
+
+test("resolveDeployCommit は git 情報がある場合それを優先し、既存の本番挙動を変えない", () => {
+  // 配信物の build 元が別 commit でも、git 管理下では従来どおり HEAD を報告する。
+  withDist({ commit: MAIN }, (root) => {
+    const resolved = resolveDeployCommit({ commit: HEAD, commitShort: HEAD.slice(0, 7) }, { cwd: root });
+    assert.equal(resolved.commit, HEAD);
+    assert.equal(resolved.commitShort, HEAD.slice(0, 7));
+    assert.equal(resolved.source, "git");
+  });
+});
+
+test("resolveDeployCommit は git 情報が無い場合だけ build-info.json の commit へフォールバックする", () => {
+  withDist({ commit: MAIN }, (root) => {
+    const resolved = resolveDeployCommit({ commit: null, commitShort: null }, { cwd: root });
+    assert.equal(resolved.commit, MAIN);
+    assert.equal(resolved.commitShort, MAIN.slice(0, 7));
+    assert.equal(resolved.source, "build-info");
+  });
+});
+
+test("resolveDeployCommit は git 情報も build-info.json も無ければ null を返す", () => {
+  withDist(undefined, (root) => {
+    const resolved = resolveDeployCommit(null, { cwd: root });
+    assert.equal(resolved.commit, null);
+    assert.equal(resolved.commitShort, null);
+    assert.equal(resolved.source, null);
+  });
 });
 
 test("readCommitCounts は left-right の出力を behind/ahead として解釈する", () => {
