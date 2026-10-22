@@ -53,7 +53,7 @@ test("native BLOCK import, attributes, moves, undo and reload work in the editor
   expect((await stored()).entities[1].attributeReferences[0].value).toBe("変更済;=1");
   await command(`SELECT ${id}`);
   await expect(page.locator('[name="blockAttribute_1"]')).toHaveValue("測点B");
-  await page.getByRole("button", { name: "図面範囲表示", exact: true }).click();
+  await page.getByRole("button", { name: "全体表示（図面範囲表示）", exact: true }).click();
   const pixels = await page.locator("#cadCanvas").evaluate((canvas) => {
     const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
     let count = 0;
