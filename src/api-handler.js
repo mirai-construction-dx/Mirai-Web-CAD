@@ -21,6 +21,20 @@ import { createEntraGroupResolver } from "./entra-graph.js";
 // ACCESS_ROLE_MAPによる個別メール指定は常にこれより優先される(resolveActor参照)。
 const ROLE_PRECEDENCE = ["cad_admin", "approver", "reviewer", "drafter", "viewer"];
 
+// 統合ステータスAPI(GET /api/integration/status)が返す連携先の状態。
+// このAPIは外部APIを呼ばず、次の定数と`core-lock/`のファイル有無だけで答える。
+// 値は2026-10-23時点の実測(docs/architecture/platform-integration.md §6)に合わせる。
+// 状態が変わったときは定数とdocs/architecture/integration-status.mdを同じPRで更新する。
+export const INTEGRATION_STATUS = Object.freeze({
+  core: Object.freeze({ registered: true, signed_release: "unverified" }),
+  // MCIPは案件の読み取りAPIを持つが、全社共通の案件IDを発番・配布するAPIは無い(§6.3)。
+  mcip: Object.freeze({ configured: false, project_id_api: "unavailable" }),
+  // CDEは稼働しているが、Web-CADの承認済み版を受け入れるAPI・クライアント登録が無い(§6.4)。
+  cde: Object.freeze({ configured: false, approved_version_api: "unavailable" }),
+  // MCPサーバーとしての公開・許可リスト登録は行っていない(§6.7)。
+  mcp: Object.freeze({ exposed: false, allowlisted: false })
+});
+
 // API応答でも使うセキュリティヘッダ。Cloudflare Pages Functionsの応答には
 // `_headers`のルールが適用されない(実測: pr-102の/api/healthにCSP/HSTSが付かない)ため、
 // API側でも同じ値を持つ必要がある。`_headers`との値の一致はテストで検証する
@@ -386,6 +400,39 @@ export async function handleApiRequest(request, env = {}) {
       authorize(actor.actor, "canRunAi");
       const status = describeAiConfig(env);
       return json({ ok: true, ...status }, 200, cors);
+    }
+
+    // 統合準備状態の読み取り専用API。Portfolio/MCIPが「Web-CADが連携可能か」を
+    // 外部から確認するためのもの。healthと違い公開せず、未認証は401にする
+    // (isPublicReadRouteには加えない)。外部API呼び出し・DB書き込み・監査追記をしない。
+    if (request.method === "GET" && route === "/integration/status") {
+      // viewer以上のみ。ROLE_POLICIESの全ロールはviewer以上(viewerが最下位)だが、
+      // 将来viewer未満のロールを追加したときに誤って通さないよう、未知ロールは拒否する。
+      if (!Object.hasOwn(ROLE_POLICIES, actor.actor.role)) {
+        throw httpError("統合ステータスを参照する権限がありません。", 403);
+      }
+      const deploy = deployProvenance(env);
+      return json(
+        {
+          ok: true,
+          system_id: "web-cad",
+          environment: typeof env.APP_ENV === "string" ? env.APP_ENV : null,
+          // 稼働中サーバーと配信物のcommitだけを返す(パス・ブランチ・dirty等は返さない)。
+          deployment: { commit: deploy.commit, distCommit: deploy.distCommit },
+          integrations: {
+            core: {
+              registered: INTEGRATION_STATUS.core.registered,
+              lock: coreLockStatus(),
+              signed_release: INTEGRATION_STATUS.core.signed_release
+            },
+            mcip: { ...INTEGRATION_STATUS.mcip },
+            cde: { ...INTEGRATION_STATUS.cde },
+            mcp: { ...INTEGRATION_STATUS.mcp }
+          }
+        },
+        200,
+        cors
+      );
     }
 
     if (request.method === "POST" && route === "/projects") {
@@ -931,6 +978,27 @@ function deployProvenance(env) {
     branch: typeof info.branch === "string" ? info.branch : null,
     dirty: typeof info.dirty === "boolean" ? info.dirty : null
   };
+}
+
+// `core-lock/contracts.lock.json`(Coreの版付き成果物の取込み)の有無。
+// 署名付きReleaseの取込みは未実施のため、現状は"absent"が正しい
+// (docs/architecture/platform-integration.md §6.2)。存在すれば"present"を返す。
+//
+// api-handler.jsはCloudflare Pages Functions(workerd)からも読み込まれるため、
+// node:fsを静的にimportしない(workerdでは解決できず、Pagesのビルドが壊れる)。
+// Node実行時だけprocess.getBuiltinModule経由で確認し、判定できない環境は
+// 「取込み済み」と誤って報告しないよう安全側の"absent"へ倒す。
+// lockFileUrlはテストから任意のパスを渡せるようにしている(実運用は既定値のみ)。
+export function coreLockStatus(lockFileUrl = null) {
+  try {
+    const target = lockFileUrl ?? new URL("../core-lock/contracts.lock.json", import.meta.url);
+    const proc = globalThis.process;
+    if (!proc || typeof proc.getBuiltinModule !== "function") return "absent";
+    const fs = proc.getBuiltinModule("node:fs");
+    return fs.existsSync(target) ? "present" : "absent";
+  } catch {
+    return "absent";
+  }
 }
 
 function json(body, status = 200, headers = {}) {
