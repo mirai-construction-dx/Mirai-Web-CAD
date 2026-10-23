@@ -43,7 +43,7 @@ Cloudflare Tunnel(mirai-web-cad-cloudflared.service)
   → http://127.0.0.1:18812 (mirai-web-cad.service, scripts/serve-production.mjs)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad)
 
-Cloudflare Tunnel(mirai-web-cad-cloudflared.service)   # 未構築(オーナーY/N待ち)
+Cloudflare Tunnel(mirai-web-cad-cloudflared.service)
   → mirai-web-cad-stg.mirai-dx-platform.com
   → http://127.0.0.1:18814 (mirai-web-cad-staging.service)
   → ローカルPostgreSQL 16(127.0.0.1:5432, DB=mirai_web_cad_staging)
@@ -61,7 +61,9 @@ Cloudflare設定は`infra/cloudflare/`にTerraform v5構成を置き、既存資
 
 MVP URLはサイト全体をCloudflare Accessで保護し、`kensan1969@gmail.com`だけを許可する。本番の公開デモ用bypass policyはMVPへ引き継がない。MVPと本番は同じソースとTunnelを使うが、待受ポート、環境ファイル、PostgreSQLデータベース、バックアップ保存先を分離する。`mirai-web-cad-mvp-monitor.timer`は15分ごとにローカルAPI、DB名、公開URLのAccess 302境界を検証する。`mirai-web-cad-mvp-restore-drill.timer`は毎週、最新バックアップを専用の隔離DBへ復元する。
 
-Stagingは[ADR-0005](adr/ADR-0005-staging-environment.md)で新設した3系統目で、本番と同一構成のリリース候補検証用である。本番・MVPと同じソースとTunnelを使うが、待受ポート`18814`、サービス`mirai-web-cad-staging.service`、環境ファイル`staging.env`、PostgreSQLデータベース`mirai_web_cad_staging`(復元用隔離DB`mirai_web_cad_staging_recovery`)、バックアップ先`/var/backups/mirai-web-cad/staging-postgres/`を分離する。`mirai-web-cad-staging-monitor.timer`は15分ごとにローカルAPI、接続DB名、公開URLのAccess 302境界を検証する。ホストへの反映(DNS・Access・秘密情報・systemd配置・DB作成)は[GITHUB_POLICY.md](../GITHUB_POLICY.md) §8のHuman GateとしてオーナーのY/N待ちで未実施であり、手順は[Staging構築手順書](runbooks/staging-bringup.md)を参照。
+Stagingは[ADR-0005](adr/ADR-0005-staging-environment.md)で新設した3系統目で、本番と同一構成のリリース候補検証用である。**本番・MVPは共有worktreeの`dist`/`node_modules`を、Stagingは独立ランタイム`~/.local/share/mirai-web-cad/staging-runtime/current`（=`releases/<sha>`へのsymlink）を使う**（[ADR-0006](adr/ADR-0006-staging-independent-release-channel.md)）。Tunnelは共用で、待受ポート`18814`、サービス`mirai-web-cad-staging.service`、環境ファイル`staging.env`、PostgreSQLデータベース`mirai_web_cad_staging`(復元用隔離DB`mirai_web_cad_staging_recovery`)、バックアップ先`/var/backups/mirai-web-cad/staging-postgres/`を分離する。Stagingの反映は`scripts/deploy-staging.sh`（本番・MVPは`scripts/deploy-local.sh`）で、Stagingだけを先行デプロイできる。`mirai-web-cad-staging-monitor.timer`は15分ごとにローカルAPI、接続DB名、公開URLのAccess 302境界を検証する。ホストへの反映(DNS・Access・秘密情報・systemd配置・DB作成)は2026-10-16に完了し、2026-10-23に独立リリースチャネルへ移行済みである（手順は[Staging構築手順書](runbooks/staging-bringup.md)）。2026-10-23 09:02時点の配信commitは本番・MVP・Stagingとも`dd4bddb`。
+
+2026-10-23の独立リリース受入（先行デプロイ・readiness・ローカルE2E・公開境界・監視の実測）と、本番・MVPへの反映（`scripts/deploy-local.sh`、最終commit `dd4bddb`、本番デプロイでStagingは再起動されず）は[Staging受入記録 2026-10-23](runbooks/staging-acceptance-2026-10-23.md)を参照。
 
 Cloudflare Pages(`functions/api/`、`wrangler.toml`)はロールバック手段として当面残置していますが、`main`へのマージでは自動デプロイされません(`.github/workflows/production.yml`のdeployジョブは削除済み、`CLOUDFLARE_DEPLOY_ENABLED`変数もPR Preview用途にのみ影響します)。
 
@@ -183,12 +185,12 @@ node scripts/check-deploy-drift.mjs --url http://127.0.0.1:18812 --remote
 
 ## Rollback
 
-本番はこのホスト(kensan1969)上のsystemdサービスです。`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、稼働中のツリーで`npm ci`・`npm run build`は実行せず、向き先を直前のリリースへ戻します(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「ロールバック」、オーナー不在時は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md))。戻した後は本番・MVP(および設置済みならStaging)で確認します。
+本番はこのホスト(kensan1969)上のsystemdサービスです。`dist`と`node_modules`は`.releases/<sha>/`へのsymlinkのため、稼働中のツリーで`npm ci`・`npm run build`は実行せず、向き先を直前のリリースへ戻します(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「ロールバック」、オーナー不在時は[オーナー不在時のロールバック](runbooks/owner-absence-rollback.md))。戻した後は本番・MVPとStagingで確認します。Stagingは独立ランタイムのため、**Stagingだけを戻す場合は`bash scripts/deploy-staging.sh <直前の正常commit>`を使い、本番・MVPのサービスは再起動しません**（本番・MVPの`scripts/deploy-local.sh`はStagingに触れません）。
 
 ```bash
 curl -fsS http://127.0.0.1:18812/api/health   # commit と distCommit が直前のSHAであること
 curl -fsS http://127.0.0.1:18813/api/health
-curl -fsS http://127.0.0.1:18814/api/health   # Staging設置後のみ
+curl -fsS http://127.0.0.1:18814/api/health   # Staging(独立ランタイム)
 ```
 
 `scripts/deploy-local.sh`は、切替後のhealth・稼働commit・配信物のbuild元の確認に失敗すると、作業ツリーとsymlinkを直前の状態へ自動で戻します。DB migrationは破壊的変更を含めていないため、ロールバック時も既存テーブルを削除しません。
@@ -255,7 +257,7 @@ RESTORE_DATABASE_URL="postgresql://empty-recovery-db" \
 
 本番の日次バックアップは`mirai-web-cad-backup.timer`(systemd、毎日03:10 JST)が担い、`/var/backups/mirai-web-cad/postgres/`へ保存します(保持14日)。詳細は[ローカルデプロイ運用メモ](deployment-local.md)を参照。暫定目標はRPO 24時間、RTO 4時間。オフサイト転送は、ageで暗号化してCloudflare R2へ毎日転送し(保持90日)、バックアップ関連のユニットが失敗するとGitHub Issueで通知する仕組みです。**ただし、R2 token・age鍵・ユニットの設置と初回試験が完了するまでは未稼働**で、オフサイトの複製は存在しません(手順は[ローカルデプロイ運用メモ](deployment-local.md)の「オフサイト転送と失敗通知」、決定事項は[外部入力・確定待ち台帳](external-input-status.md)§5)。
 
-Stagingは本番・MVPと別に専用のsystemdタイマーを持ちます([ADR-0005](adr/ADR-0005-staging-environment.md))。`mirai-web-cad-staging-backup.timer`(毎日03:50 JST)が`/var/backups/mirai-web-cad/staging-postgres/`へ日次保存し(保持14日)、`mirai-web-cad-staging-backup-check.timer`(毎日06:45 JST)が鮮度(36時間以内・0バイト超)を検査、`mirai-web-cad-staging-restore-drill.timer`(日曜04:50 JST)が隔離DB`mirai_web_cad_staging_recovery`へ復元ドリルを行います。Stagingはオフサイト転送(R2)の対象には当面含めません。ホストへの配置・有効化はオーナーY/N待ちで未実施です(手順は[Staging構築手順書](runbooks/staging-bringup.md))。
+Stagingは本番・MVPと別に専用のsystemdタイマーを持ちます([ADR-0005](adr/ADR-0005-staging-environment.md))。`mirai-web-cad-staging-backup.timer`(毎日03:50 JST)が`/var/backups/mirai-web-cad/staging-postgres/`へ日次保存し(保持14日)、`mirai-web-cad-staging-backup-check.timer`(毎日06:45 JST)が鮮度(36時間以内・0バイト超)を検査、`mirai-web-cad-staging-restore-drill.timer`(日曜04:50 JST)が隔離DB`mirai_web_cad_staging_recovery`へ復元ドリルを行います。Stagingはオフサイト転送(R2)の対象には当面含めません。ホストへの配置・有効化は2026-10-16に完了し、2026-10-23に独立リリースチャネルへ移行済みです(4タイマーは`enabled`/`active`。定期ジョブも独立ランタイムの`current`から実行するため、本番デプロイに依存しません。手順は[Staging構築手順書](runbooks/staging-bringup.md))。
 
 ## 合成監視・障害Issue自動起票
 

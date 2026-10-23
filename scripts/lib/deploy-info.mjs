@@ -11,6 +11,8 @@
 // 判定はローカルのgit情報だけを使い、ネットワークへは一切アクセスしない
 // (systemd起動時のガードとして使うため、外部到達性に依存させない)。
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 export const DEPLOY_PROVENANCE = Object.freeze({
   VERIFIED: "verified", // origin/mainと一致しており、未コミット変更もない
@@ -64,6 +66,55 @@ export function readDeployInfo(options = {}) {
   } catch {
     return { commit: null, commitShort: null, branch: null, dirty: null, originMain: null };
   }
+}
+
+/**
+ * 配信物(dist/build-info.json)が記録するbuild元commitを読み取る。
+ *
+ * `scripts/build.mjs`は`BUILD_COMMIT`(無ければgit HEAD)を`dist/build-info.json`へ書く。
+ * 独立リリースのStagingのようにgit管理外のアーカイブを配信する場合、サーバー側のgit情報は
+ * 無いが、配信物にはbuild元commitが残っている。healthの`deploy.commit`をこの値へ
+ * フォールバックさせ、アーカイブ配信でも稼働commitを機械的に確認できるようにする。
+ * 壊れた/欠落したファイルはnullを返し、例外は投げない(起動を止めないため)。
+ * @param {{ cwd?: string, distRoot?: string }} [options]
+ * @returns {string|null}
+ */
+export function readBuildInfoCommit(options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const distRoot = options.distRoot ?? path.join(cwd, "dist");
+  try {
+    const info = JSON.parse(readFileSync(path.join(distRoot, "build-info.json"), "utf8"));
+    return typeof info.commit === "string" && info.commit.length > 0 ? info.commit : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 稼働commitを決める。git情報がある場合はそれを最優先し(本番の既存挙動を変えない)、
+ * git情報が無い場合に限り配信物のbuild元commitへフォールバックする。
+ * provenanceの判定(git情報に基づく)は別関数のままとし、ここでは「どのcommitとして
+ * 報告するか」だけを決める。
+ * @param {{ commit: string|null, commitShort?: string|null }|null} info readDeployInfoの戻り値
+ * @param {{ cwd?: string, distRoot?: string }} [options]
+ * @returns {{ commit: string|null, commitShort: string|null, source: "git"|"build-info"|null, buildInfoCommit: string|null }}
+ */
+export function resolveDeployCommit(info, options = {}) {
+  const buildInfoCommit = readBuildInfoCommit(options);
+  if (info?.commit) {
+    return {
+      commit: info.commit,
+      commitShort: info.commitShort ?? info.commit.slice(0, 7),
+      source: "git",
+      buildInfoCommit
+    };
+  }
+  return {
+    commit: buildInfoCommit,
+    commitShort: buildInfoCommit ? buildInfoCommit.slice(0, 7) : null,
+    source: buildInfoCommit ? "build-info" : null,
+    buildInfoCommit
+  };
 }
 
 /**

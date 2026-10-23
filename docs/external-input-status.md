@@ -1,21 +1,28 @@
 # 外部入力・確定待ち台帳
 
-更新日: 2026-09-25
+更新日: 2026-10-23
 
 コードだけでは確定できない運用情報を、推測値で埋めないための台帳です。秘密値、個人の電話番号、実案件名、図面本体はGitへ保存しません。
 
 ## 1. Cloudflare Terraform移管
 
-| 確認項目 | 2026-09-05の実測 | 次に必要な入力 |
-| --- | --- | --- |
-| API token自体 | `/user/tokens/verify`はHTTP 200 | なし |
-| Access Application一覧 | 対象accountへのAPIはHTTP 200だが0件 | 正しいZero Trust accountの確認、または対象accountへ`Access Apps and Policies Read/Write`を付けたtoken |
-| MVP/本番DNS | 対象zoneのDNS APIはHTTP 403(code 10000) | 対象zone限定の`DNS Read/Write` |
-| Tunnel | 既知のTunnel IDはテンプレートへ記録済み | 対象account限定の`Cloudflare Tunnel Read/Write` |
-| `terraform.tfvars` | 未作成。IDを推測していない | Application、policy、MVP DNS、本番DNSの実ID |
-| import/plan/apply | 未実施 | 上記IDを棚卸し後、import-only planが無差分であること |
+2026-10-16に、オーナーがCloudflare自動化(CTO)をY委譲しました。Web-CAD自身の資源(account・zone・Tunnel・本番/MVP/StagingのDNSとAccess)のread-only棚卸しは完了し、実IDを下表と`terraform.tfvars`(Git管理外、ローカル作成)へ記録しました。共通基盤側を含む一般的なimport/applyは引き続き未実施です。移行設計と手順は[Cloudflare Terraform手順](../infra/cloudflare/README.md)を参照してください。
 
-権限追加後は[Cloudflare Terraform手順](../infra/cloudflare/README.md)の順にread-only棚卸しをやり直します。Access policyにメール完全一致1件以外の差分、DNS/Tunnelの置換、`everyone`/`bypass`が出た場合はapplyしません。
+| 確認項目 | 2026-10-16の実測 | 次に必要な入力 |
+| --- | --- | --- |
+| API token自体 | 対象account/zoneへのread-only棚卸しが成功(旧`403/code 10000`は解消) | なし |
+| account / zone | account `4f1e888469df7e0b896bb4e211b12633`("Kensan1969@gmail.com's Account")、zone `mirai-dx-platform.com` = `e375e651e49a40801a305b89e297bff0` | なし(Web-CAD分は棚卸し完了) |
+| Tunnel | `mirai-web-cad` = `f8c9fb57-fb21-4a24-b1be-f7dd5699badc`(status healthy) | なし |
+| 本番DNS | CNAME `mirai-web-cad.mirai-dx-platform.com` = `8db3c9fbe3c71daf42e86786849b157a`(→`f8c9fb57-...cfargotunnel.com`、proxied) | なし |
+| MVP DNS | CNAME `mirai-web-cad-mvp.mirai-dx-platform.com` = `7651bc461b8c7f7c7dc7d8789115539c`(→同じTunnel) | なし |
+| Staging DNS | CNAME `mirai-web-cad-stg.mirai-dx-platform.com` = `1ce6a00f970aa00c1b152d33bebec2a8`(→同じTunnel、2026-10-16作成) | なし |
+| MVP Access | Application `mirai-web-cad-mvp` = `434a047a-4277-4423-8b91-eed6d7989116`(aud `0c1341f13d88180c1ae1cfaca70b175891c1b72b373567c51cab8e29ba7ce64c`、session 24h)、allow policy `allow-kensan-only` = `44230a75-b7b2-454c-a454-35b2afd2a26e`(decision allow、include email `kensan1969@gmail.com`、precedence 1) | なし |
+| Staging Access | Application `mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`(aud `826bd6bc9d3b8e74214dbcd09376c0e803092e272db1d9ce4e8190d98d6302bf`、self_hosted、session 24h、http_only_cookie_attribute true、app_launcher_visible false、auto_redirect_to_identity false、options_preflight_bypass true)、allow policy `allow-kensan-only` = `6a4e42ff-8133-4225-ad80-d2ca654a8d75`(decision allow、include email `kensan1969@gmail.com`、precedence 1、exclude/requireなし) | なし |
+| 本番専用Access(不変) | `mirai-web-cad-api` = `e0ac286f-412e-4ae4-a969-8befeb7a0b56`、`mirai-web-cad-demo-bypass` = `d03ef7a8-9507-410b-b43c-1a0387b49bde`、`mirai-web-cad-health-bypass` = `89e00d5d-40ff-4c57-98d3-65a2f215656e` | なし |
+| `terraform.tfvars` | 未コミット(ローカル作成、Git管理外)。上記の実IDを記載 | 共通基盤側のID確認(必要な範囲で) |
+| import/plan/apply | 未実施(`enable_management=false`を維持) | 上記IDを用いたimport-only planが無差分であること |
+
+[Cloudflare Terraform手順](../infra/cloudflare/README.md)の順にread-only棚卸しを実施しました。Access policyにメール完全一致1件以外の差分、DNS/Tunnelの置換、`everyone`/`bypass`が出た場合はapplyしません。
 
 ## 2. Entra ID・運用体制
 
@@ -45,18 +52,20 @@
 
 全体構成 V3.6・リポジトリ構成 V3.6・OS/アプリ選定 V3.5 とWeb-CADの差のうち、本リポジトリだけでは確定できない事項。詳細は[基盤連携の要件と現状](architecture/platform-integration.md)。
 
-| 事項 | 状態(2026-09-25) | 内容・次の入力 |
+| 事項 | 状態(決定日／2026-10-23再確認) | 内容・次の入力 |
 | --- | --- | --- |
-| 1. system_id | **決定・登録済み** | `web-cad`(オーナー決定)。Core `registries/systems.yaml`への登録は**PR #27が2026-09-28にマージ済み(登録完了)**。Platform-Infraの台帳は未作成 |
+| 1. system_id | **決定・登録済み** | `web-cad`(オーナー決定)。Core `registries/systems.yaml`への登録は**PR #27が2026-09-28にマージ済み(登録完了)**。**Platform-Infraの`systems.yaml`にも登録済み**(2026-10-12追加、`uses_core: false`、`production: false`。2026-10-23実測)。Coreの`registries/integration-baseline.json`ではWeb-CADは「宣言なし」(`declared_version: null`) |
 | 2. AI Provider直接呼出し | **決定** | 案A(期限付きの暫定例外)、見直し期限2026-12-25([ADR-0003](adr/ADR-0003-ai-provider-direct-call-interim.md)承認済み)。移行条件はMCAH Model GatewayのWeb-CAD向け契約公開とsystem_id登録 |
 | 3. マージ前の人間レビュー | **決定(2026-09-30改定)** | **中央ポリシー v2 の自動マージへ統一(A型を廃止)**: PR は `gh pr merge --auto --squash` で自動マージを予約する。マージの条件は Required Checks の全成功と merge conflict がないことだけとし、人間の Y/N・選択・Approve を待たない。`--admin` による迂回は禁止する。Release・本番デプロイ・秘密情報の変更・不可逆な削除は、コードのマージとは別に Human Gate とする。（正本: 中央ポリシー `GITHUB_POLICY.md` v2） 以下は2026-09-25改定(A型)の記録:  Bot名義のPRにオーナーがGitHub上でApproveしてからマージ(承認1件+CODEOWNER、最後のpush後の承認、スレッド解決を必須)。Botは2人目の代わりにしない。**2人目の承認者は2026-10以降に決定**(オーナー判断)。基盤方針の通常2名・重要3名を満たしていないリスクを、下記の補完策を前提に受け入れる。**見直し期限 2026-10-31**。先送りを終える契機: 実案件図面の取扱い開始、オーナー以外の利用者への提供開始、見直し期限の到来のいずれか |
 | 4. CODEOWNERSのTeam | **決定(2026-09-30改定)** | CODEOWNERはレビュー依頼先とし、承認は必須でない(2026-09-25〜09-30はA型のため必須化していた)。当面は個人`@Kensan196948G`(管理者権限あり)をCODEOWNERとし、2人目の決定時にWrite以上のTeamへ移す |
 | 5. 技術標準の適用範囲 | **決定** | アプリ構成は例外として維持、実行環境はNode 24へ2027-01-31まで、PostgreSQL 18へ2027-11-30までに更新([ADR-0004](adr/ADR-0004-tech-stack-vs-os-selection.md)承認済み) |
-| 6. Core成果物の版 | **決定** | 取り込むのはCoreのGitHub Releaseのみ(タグのvendoringはしない)。`SHA256SUMS`照合と`mhc verify`に加え、署名・来歴証明の検証を必須とする(v0.7.0(Latest)も署名・attestationなし、2026-10-02確認)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で、必要な版の署名付きReleaseが無ければCoreへ作成を依頼する。手順は[基盤連携の要件と現状](architecture/platform-integration.md)§3 |
-| 7. 案件ID・確定版・MCP | **決定** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続し、MCIPの案件ID API公開時に外部ID列をadditive migrationで追加。確定版: CDEのAPI公開時に承認済み版を登録。MCP: 読み取り系ツールから、Coreで契約化→Allowlist登録の順 |
+| 6. Core成果物の版 | **決定(2026-10-23再確認)** | 取り込むのはCoreのGitHub Releaseのみ(タグのvendoringはしない)。`SHA256SUMS`照合と`mhc verify`に加え、署名・来歴証明の検証を必須とする。**Latestは`v0.8.0`(2026-10-19公開)だが、署名・attestationは無い**(`/attestations/sha256:<digest>`が404、`registries/signing-keys.yaml`は`keys: []`、`release.yml`のbuildジョブは`if: false`。2026-10-23実測)。現時点は取り込まない。契機(証跡のMCIP送信、MCP公開)の時点で、必要な版の署名付きReleaseが無ければCoreへ作成を依頼する。手順は[基盤連携の要件と現状](architecture/platform-integration.md)§3 |
+| 7. 案件ID・確定版・MCP | **決定(2026-10-23再確認)** | 第3段階。契機まで実装しない。案件ID: 独自採番を継続する。MCIPには案件の**読み取り**API(`GET /api/v1/projects`、`GET /api/v1/projects/:code`)はあるが、**全社共通の案件IDを発番・配布するAPIは未実装**(MCIP `docs/architecture/V3.2整合性評価.md:14`、2026-10-23実測)。公開時に外部ID列をadditive migrationで追加。確定版: CDEにはREST APIとMCPツールがあるが、**Web-CAD向けの承認済み版登録API・クライアント登録は無い**(2026-10-23実測)。CDEの受入API公開時に登録する。MCP: Coreの`mcp_server_id`は`null`、`registries/mcp-allowlist.yaml`に`web-cad`は無い。読み取り系ツールから、Coreで契約化→Allowlist登録→Entra App ID URI確定の順 |
 | 8. Organization名 | **決定** | `mirai-construction-dx`に統一。原典(全体構成 V3.6)のHTMLは変更せず、Portfolioの未決事項表(PORT-BL-001 BL-06)に決定を記録(Portfolio PR #20) |
+| 9. CDEの承認済み版登録API | **外部入力待ち(2026-10-23追加)** | Web-CADの確定版をCDEへ登録するAPI・認証・受入設計がCDE側に無い。CDEが(1)登録API、(2)Web-CAD用のクライアント認証、(3)版・承認・証跡の受入形式を提供するまで実装しない。詳細は[基盤連携の要件と現状](architecture/platform-integration.md)§6.4・§6.7 |
+| 10. Staging E2E(Access Service Token) | **オーナー実施待ち(2026-10-23追加)** | Staging公開URLをAccess Service Tokenで認証するE2E(`npm run test:e2e:staging`)は、テスト時だけService Tokenを発行・削除する運用のためオーナーが実施する。トークン値はGit・ログ・チャットへ出さない。手順は[Staging構築手順書](runbooks/staging-bringup.md)§12 |
 
-2026-10-16に読み取りで再確認: Core `origin/main` の `registries/systems.yaml` に `web-cad` が登録済み。Core main は 0.8.0、GitHub Release の Latest は `v0.7.0`(署名・attestationは依然なし)、Core のマージ規定も自動マージへ統一済み。他Consumerの pin 状況は Core `docs/integration-audit-2026-10-05.md` を参照。Staging環境([ADR-0005](adr/ADR-0005-staging-environment.md))は第3段階まで新しいリポジトリ間結合を追加しない。
+2026-10-23に読み取りで再確認: Core `origin/main`(`7e799e5`)の`registries/systems.yaml`に`web-cad`が登録済み。Latest Releaseは`v0.8.0`(2026-10-19公開)で、`contracts.tar.gz`のSHA256は`SHA256SUMS`と一致したが、署名・attestationは無く`signing-keys.yaml`は空のまま。Platform-Infraの`systems.yaml`にも`web-cad`が登録済み(2026-10-12、`uses_core: false`)。MCIPは対外案件ID APIが未実装、CDEはWeb-CAD向けの確定版登録APIが無い。Portfolioのweb-cadはPages本番のみでStaging未登録(別タスクでPORT-OPS-007として登録)。Staging環境([ADR-0005](adr/ADR-0005-staging-environment.md))は第3段階まで新しいリポジトリ間結合を追加しない。
 
 ### 1名承認体制の補完策(2026-09-25)
 
@@ -86,10 +95,14 @@
 
 ## 再開条件
 
-- Cloudflare: 上記3権限を対象account/zoneだけに付けたtokenが現在のシェルへ投入済み
+- Cloudflare: Web-CAD自身の資源(account/zone/Tunnel/DNS/Access)のread-only棚卸しは完了(2026-10-16、オーナーY委譲)。実IDは`terraform.tfvars`(Git管理外)へ記録済み。共通基盤側を含む一般のimport-only plan/applyは引き続き未実施で、`enable_management=false`を維持する
 - Entra: tenant内の対象UPN、グループGUID対応、Secret運用責任者、当番/SLA台帳の参照IDが確定
 - Phase 0: 許諾済みDXFの保管場所とUAT参加者台帳の参照IDが確定
-- 基盤整合: 8件とも決定済み(2026-09-25)。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7の契機の到来を追跡する
+- 基盤整合: 8件とも決定済み(2026-09-25)。2026-10-23の再実測で、1(Platform-Infra台帳)は登録済み、6は署名付きRelease待ち、7はMCIP/CDEのAPI待ちであることを確認した。5の期限(Node 2027-01-31、PostgreSQL 2027-11-30)と、6・7・9の契機の到来を追跡する
+- Core: **consumer別evidence schema(または`source_system`制約の緩和)** と、署名鍵(O-16)・attestationが有効な**署名付きRelease**が提供されたら、`src/core-evidence.js`の`schema`を確定し、`SHA256SUMS`と署名を照合して`core-lock/`で版固定し、`mhc verify`を通す。あわせてMCIP等への送信可否を決める(2026-10-23時点は射影のみ実装済み・非準拠・送信なし)
+- MCIP: 対外案件IDの発番・配布APIが提供されたら、`project_id`の外部ID列をadditive migrationで追加し、読み取り・照合を実装する
+- CDE: Web-CADの承認済み版を受けるAPI・認証・受入形式が提供されたら、登録アダプタを実装する
+- Staging: Access Service Tokenを使うE2Eをオーナーが実施し、結果を記録する
 - オフサイト転送: R2 token・age鍵・ユニット設置の実施(オーナーのY/N後)と、初回転送・復号・通知の試験の成功
 
 再開時も、秘密値や個人情報そのものはIssue、PR、Git、チャットへ貼り付けません。

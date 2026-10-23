@@ -11,7 +11,7 @@
 - systemdユニットの配置・enable
 
 > [!IMPORTANT]
-> 本手順書の作成時点で、**ホストへの反映は1つも実施していません**。DNS・Access・秘密情報・systemd配置・DBはいずれも未作成で、Stagingはまだ利用できません。各Human GateのY/Nを得た後に、上から順に実施してください。
+> 2026-10-16にオーナーの認可「私が全部実行する」のもと、CTOが**Human Gate 1〜6**（DNS route＋Tunnel ingress、Access Application/Policy、`staging.env`・`staging-backup.env`、Staging用DB/ロール、systemdユニット配置・enable、復元ドリル初回実行）を実施し、**Gate 7も一部完了**（Readiness全項目OK、公開URL 302、本番/MVP不変）しました。**`mirai-web-cad-staging.service`は`127.0.0.1:18814`で稼働中**です。2026-10-23には[ADR-0006](../adr/ADR-0006-staging-independent-release-channel.md)の**独立リリースチャネルへ移行**し、[受入記録](staging-acceptance-2026-10-23.md)のとおり先行デプロイ（`625e7c3`）・readiness・ローカルE2E・公開境界・監視（08:47 success）まで完了しています。**本番・MVPへの反映（`scripts/deploy-local.sh`、コードのマージとは別のHuman Gate）も同日09:01〜09:02 JSTに完了**し、以降は本番・MVP・Stagingとも`dd4bddb…`を配信しています。残るのはAccess Service Tokenを使う`npm run test:e2e:staging`（トークン値がログに残らないようオーナーがローカルで実施）のみです。詳細は§10を参照してください。
 
 対象サービスの固定値は次のとおりです。本書と[ローカルデプロイ運用メモ](../deployment-local.md)・[運用・復旧メモ](../operations.md)で同じ値を使います。
 
@@ -36,12 +36,13 @@
 
 - systemdユニット定義: `deploy/systemd/mirai-web-cad-staging.service`、`mirai-web-cad-staging-backup.service`/`.timer`、`mirai-web-cad-staging-backup-check.service`/`.timer`、`mirai-web-cad-staging-monitor.service`/`.timer`、`mirai-web-cad-staging-restore-drill.service`/`.timer`
 - 監視スクリプト: `scripts/check-staging-health.sh`（ローカルAPI、接続DB名、公開URLのAccess境界を検査）
-- デプロイスクリプト: `scripts/deploy-local.sh`を本番・MVP・Stagingの**3系統一括切替**へ拡張
+- デプロイスクリプト: `scripts/deploy-staging.sh`（Staging専用ランタイム `~/.local/share/mirai-web-cad/staging-runtime` の `releases/<sha>` へ構築し、`current` symlinkを原子切替してStagingだけを再起動する独立デプロイ）。本番・MVPの`scripts/deploy-local.sh`はStagingに触れない
+- systemdユニットの`WorkingDirectory`は `~/.local/share/mirai-web-cad/staging-runtime/current`（本番ツリーを共有しない。常駐サービス・定期ジョブとも）
 - Cloudflare定義: `infra/cloudflare/`のStaging定義（変数化。`enable_management=false`は据え置き、import planが無差分になるまでapplyしない）
-- CI: Staging構成の検査(`scripts/check-staging-config.sh`、CIジョブ「Staging Configuration」。ユニットの存在・必須ディレクティブ・`deploy-local.sh`の18814対応・DB名の一致・本番専用経路へ未配線を検査)
+- CI: Staging構成の検査(`scripts/check-staging-config.sh`、CIジョブ「Staging Configuration」。ユニットの存在・必須ディレクティブ・`WorkingDirectory`・`deploy-staging.sh`の独立ランタイム方式・`deploy-local.sh`がStagingへ触れないこと・DB名の一致・本番専用経路へ未配線を検査)
 - 文書: ADR-0005、本書、[ローカルデプロイ運用メモ](../deployment-local.md)、[運用・復旧メモ](../operations.md)、README、`state.json`
 
-`scripts/deploy-local.sh`は、本番・MVP・Stagingの3系統を一度の操作で切り替えます。ただしStagingのsystemdユニットが設置されていない間は、稼働中ツリーを変更しません（MVPと同じく、未設置の環境は対象外）。
+Stagingは `scripts/deploy-staging.sh [commit]` で**本番から独立して**リリースします（省略時は`origin/main`）。専用ランタイムの`releases/<sha>`へ`git archive`+`npm ci --ignore-scripts`+`BUILD_COMMIT=<sha> npm run build`で構築し、`staging.env`から`DATABASE_URL`を`sed`で1変数だけ取り出して`db:check`を実行、`current`を原子切替して`mirai-web-cad-staging.service`だけを再起動します。本番・MVPの作業ツリー・`dist`・`node_modules`は変更しません。本番への反映は従来どおり`scripts/deploy-local.sh`（本番・MVPの2系統）です。
 
 ## 2. Human Gateの全体像
 
@@ -57,20 +58,29 @@ Y/Nは各ステップの実行前に個別に取得します。前のステッ�
 | 6 | 復元ドリルの初回実行 | なし（隔離DB内で完結） | なし |
 | 7 | 公開URLのAccess境界確認 | なし | 1・2のロールバックに同じ |
 
+> [!NOTE]
+> **実施状況（2026-10-16）:** Human Gate 1〜6は実施済み、Gate 7も一部完了（オーナーの認可「私が全部実行する」のもとCTOが実行）。作成された実IDと検証結果は§3・§4に記載しています。`mirai-web-cad-staging.service`は`127.0.0.1:18814`で**active**（health `ok=true`、`db.mode=connected`、DB `mirai_web_cad_staging`、`auth.mode=access`）、バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は成功、`bash scripts/check-staging-readiness.sh`は**exit 0（全項目OK）**、公開URLは302、本番/MVPは不変です。**監視も2026-10-23 08:47の手動実行でsuccess**（本番worktreeが`check-staging-health.sh`を含む`78dd2d3`へ更新されたため。[受入記録](staging-acceptance-2026-10-23.md)）。**本番・MVPへの反映（`scripts/deploy-local.sh`）も2026-10-23 09:01〜09:02 JSTに完了**し、3環境とも`dd4bddb…`を配信しています（Stagingは本番デプロイで再起動されず`ActiveEnterTimestamp`=`09:01:00`のまま）。残るのはAccess Service Tokenを使う`npm run test:e2e:staging`（トークン値がログに残らないようオーナーがローカルで実施）のみです。
+
 > [!WARNING]
 > 秘密値・資格情報・接続文字列は**Git・ログ・チャットへ一切出さないでください**。値の存在確認は`grep -o '^KEY='`のようにキー名だけを出力し、値は画面へ出しません（[AGENTS.md](../../AGENTS.md) §4、`state.json`のlearning参照）。
 
-## 3. Human Gate 1: DNS route作成とTunnel ingress追加
+## 3. Human Gate 1: DNS route作成とTunnel ingress追加【実施済み 2026-10-16】
 
 既存Tunnel`mirai-web-cad`にStagingホスト名を追加します。新しいTunnelは作りません。
 
 **コマンド**
 
 ```bash
-cloudflared tunnel route dns mirai-web-cad mirai-web-cad-stg.mirai-dx-platform.com
+cloudflared tunnel route dns f8c9fb57-fb21-4a24-b1be-f7dd5699badc mirai-web-cad-stg.mirai-dx-platform.com
 ```
 
-続けて、Tunnel ingress設定（`~/.cloudflared/mirai-web-cad-config.yml`、リポジトリ外のホスト設定）へStagingのingress行を追加し、Cloudflare Tunnelを再読込します。ingressはホスト名とオリジンの対応を定義するもので、`http://127.0.0.1:18814`を指します。
+> [!WARNING]
+> `cloudflared tunnel route dns`の第1引数には**トンネル名ではなくトンネルUUID**を渡してください。cloudflared 2026.7.3ではトンネル名`mirai-web-cad`を渡すと**別のTunnel（`onegate`、id `a423aa88-91ee-4f5a-b923-640ef448048a`）へ誤って解決**しました（2026-10-16実測）。誤って別Tunnelを向いたCNAMEはAPIで`f8c9fb57-...cfargotunnel.com`へ訂正しています。実行後は必ずCNAMEの向き先が正しいTunnelのUUIDであることを確認してください。
+
+続けて、Tunnel ingress設定（`~/.cloudflared/mirai-web-cad-config.yml`、リポジトリ外のホスト設定）へStagingのingress行を追加します。ingressはホスト名とオリジンの対応を定義するもので、`http://127.0.0.1:18814`を指します。
+
+> [!NOTE]
+> ローカル管理のTunnelはingress設定を**自動再読込しません**。Cloudflareの推奨どおりサービスを再起動してください（またはreplica運用にする）。**この再起動は本番・MVPと共用するTunnelを短時間中断します**（2026-10-16実測: 再起動後、4コネクタが再登録）。
 
 ```bash
 # ingress行を追加した後
@@ -84,14 +94,22 @@ cloudflared tunnel info mirai-web-cad
 - `cloudflared tunnel route dns`がCNAMEレコードを作成する
 - `cloudflared tunnel ingress validate`が成功する
 - `cloudflared tunnel info mirai-web-cad`でコネクタ登録が維持されている
-- この時点ではStagingサービスが未起動のため、公開URLはオリジン接続エラーになる（想定どおり。手順7で解消する）
+- この時点ではStagingサービスが未起動のため、オリジン（`http://127.0.0.1:18814`）には接続できない。ただしAccess保護下では未認証アクセスがまず**302（Accessログイン）**になる（bypassなし。§4参照）
+
+**実施結果（2026-10-16、オーナーY委譲）**
+
+- 既存Tunnel`mirai-web-cad`（`f8c9fb57-fb21-4a24-b1be-f7dd5699badc`）へCNAME`mirai-web-cad-stg.mirai-dx-platform.com`（id `1ce6a00f970aa00c1b152d33bebec2a8`、account `4f1e888469df7e0b896bb4e211b12633`、zone `e375e651e49a40801a305b89e297bff0`）を作成（proxied、向き先`f8c9fb57-...cfargotunnel.com`）
+- `~/.cloudflared/mirai-web-cad-config.yml`へ`mirai-web-cad-stg.mirai-dx-platform.com → http://localhost:18814`のingress行を追加。変更前のbackupは`mirai-web-cad-config.yml.bak-20261016T093601`
+- `cloudflared tunnel ingress validate`はOK、`cloudflared tunnel ingress rule https://mirai-web-cad-stg.mirai-dx-platform.com/`はルール#2にマッチ
+- `mirai-web-cad-cloudflared.service`を2026-10-16 09:38 JSTに再起動し、4コネクタが再登録。この再起動で共用Tunnelの本番・MVPが短時間中断した（再起動後は本番`/api/health`=200・本番`/api/drawings/demo`=200・MVP`/`=302でいずれも不変を確認）
+- ローカルでは本番18812 health=200、MVP18813 health=200、Staging18814は未起動（000）
 
 **ロールバック**
 
 - CloudflareダッシュボードまたはAPIで、`mirai-web-cad-stg.mirai-dx-platform.com`のCNAMEレコードを削除する
 - `~/.cloudflared/mirai-web-cad-config.yml`からStagingのingress行を削除し、`sudo systemctl restart mirai-web-cad-cloudflared.service`
 
-## 4. Human Gate 2: Access Application/Policy新設
+## 4. Human Gate 2: Access Application/Policy新設【実施済み 2026-10-16】
 
 Stagingホスト名の**ホスト全体**をCloudflare Accessで保護します。許可対象は`kensan1969@gmail.com`のみとし、bypass policyは作りません（本番の公開デモ用bypassを引き継がない）。
 
@@ -113,6 +131,13 @@ curl -sI https://mirai-web-cad-stg.mirai-dx-platform.com/ | head -1
 - 未認証アクセスが302でAccessログインへリダイレクトされる
 - `kensan1969@gmail.com`だけがログインできる
 - オリジン（サービス）が未起動でも、エッジ層でAccessが先に働く
+
+**実施結果（2026-10-16、オーナーY委譲）**
+
+- Staging Access Application`mirai-web-cad-stg` = `552bd803-cd79-4376-a388-278917378955`（aud `826bd6bc9d3b8e74214dbcd09376c0e803092e272db1d9ce4e8190d98d6302bf`、type self_hosted、session 24h、http_only_cookie_attribute true、app_launcher_visible false、auto_redirect_to_identity false、options_preflight_bypass true）
+- Staging allow policy`allow-kensan-only` = `6a4e42ff-8133-4225-ad80-d2ca654a8d75`（decision allow、include email `kensan1969@gmail.com`、precedence 1、exclude/requireなし。bypassなし）
+- 検証: `https://mirai-web-cad-stg.mirai-dx-platform.com/`はHTTP **302**で`https://winter-lake-f4c9.cloudflareaccess.com/cdn-cgi/access/login/...`（StagingのAUD）へ。Staging`/api/health`も302（Access先行）。本番`/api/health`=200、本番`/api/drawings/demo`=200、MVP`/`=302はいずれも不変
+- 既存の本番専用Access Application（`mirai-web-cad-api` `e0ac286f-412e-4ae4-a969-8befeb7a0b56`、`mirai-web-cad-demo-bypass` `d03ef7a8-9507-410b-b43c-1a0387b49bde`、`mirai-web-cad-health-bypass` `89e00d5d-40ff-4c57-98d3-65a2f215656e`）は変更なし
 
 **ロールバック**
 
@@ -219,6 +244,16 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/staging.env
 
 ユニット定義を`/etc/systemd/system/`へ配置し、サービスとタイマーを有効化します。失敗通知は既存の`mirai-web-cad-notify-failure@.service`（H-3で導入済み）へ`OnFailure=`で接続します。
 
+> [!IMPORTANT]
+> バックアップユニットは`ReadWritePaths=/var/backups/mirai-web-cad/staging-postgres`を持つため、**この**ディレクトリを**先に作成**してください。未作成のまま有効化すると、systemdのマウント名前空間設定に失敗し`status=226/NAMESPACE`で失敗します（2026-10-16実測）。MVPと同じ所有者・権限にします。
+>
+> ```bash
+> sudo install -d -o kensan -g kensan -m 0700 /var/backups/mirai-web-cad/staging-postgres
+> ```
+
+> [!NOTE]
+> 監視（`mirai-web-cad-staging-monitor.service`）・バックアップ・鮮度検査・復元ドリルも、`WorkingDirectory`は独立ランタイムの`current`です。各ユニットはリリース内の`scripts/`（`check-staging-health.sh`等）を実行するため、**本番worktreeの更新に依存しません**（2026-10-23に移行。同日09:13に4ジョブを手動実行し、すべて成功。[受入記録](staging-acceptance-2026-10-23.md) §4.2）。
+
 **コマンド**
 
 ```bash
@@ -235,6 +270,11 @@ sudo install -o root -g root -m 0644 \
   /etc/systemd/system/
 sudo systemctl daemon-reload
 
+# 独立ランタイムのcurrentを作ってからサービスを起動する(currentが無い状態で起動すると
+# WorkingDirectory不在で失敗するため)。deploy-staging.shは対象commitを構築し、
+# currentを切り替えた後、Stagingサービスだけを再起動する(本番・MVPには触れない)。
+bash scripts/deploy-staging.sh
+
 sudo systemctl enable --now mirai-web-cad-staging.service
 sudo systemctl enable --now mirai-web-cad-staging-backup.timer mirai-web-cad-staging-backup-check.timer
 sudo systemctl enable --now mirai-web-cad-staging-monitor.timer
@@ -244,12 +284,18 @@ sudo systemctl enable --now mirai-web-cad-staging-restore-drill.timer
 **期待結果**
 
 - `systemctl status mirai-web-cad-staging.service`が`active`、`journalctl -u mirai-web-cad-staging.service -n 20`にエラーがない
-- `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名が`mirai_web_cad_staging`、`deploy.commit`が配信中のcommitと一致
+- `systemctl show -p WorkingDirectory --value mirai-web-cad-staging.service`が`/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`
+- `readlink ~/.local/share/mirai-web-cad/staging-runtime/current`が`releases/<対象commit SHA>`を指し、その`dist/build-info.json`の`commit`が対象commitと一致する
+- `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、`deploy.distCommit`が対象commitと一致（`deploy.commit`はgit情報の無いアーカイブ配信のため`dist/build-info.json`へフォールバックし、同じ値を返す）。匿名healthは`db.database`を伏せるため、接続DB名は`db:check`または`psql "$DATABASE_URL" -Atqc 'select current_database()'`で`mirai_web_cad_staging`を確認する
 - 4タイマーが`enabled`/`active (waiting)`である
+- `bash scripts/check-staging-readiness.sh`が**exit 0**（全項目OK）である
 
 **ロールバック**
 
 ```bash
+# Stagingだけを直前の正常commitへ戻す(本番・MVPは再起動しない)
+bash scripts/deploy-staging.sh <直前の正常commit SHA>
+
 sudo systemctl disable --now \
   mirai-web-cad-staging-monitor.timer \
   mirai-web-cad-staging-restore-drill.timer \
@@ -259,6 +305,17 @@ sudo systemctl disable --now mirai-web-cad-staging.service
 sudo rm /etc/systemd/system/mirai-web-cad-staging*.service /etc/systemd/system/mirai-web-cad-staging*.timer
 sudo systemctl daemon-reload
 ```
+
+### 共有worktreeからの独立リリース移行（既存環境のみ）
+
+2026-10-16時点の構築では、Stagingは本番と同じworktreeの`dist`/`node_modules`から配信していました。本PR以降は独立ランタイムへ移行します。既存環境では**ユニット再配置（`WorkingDirectory`変更）と初回`deploy-staging.sh`実行**が必要で、systemd設定の変更にあたるためHuman GateとしてオーナーのY/Nを得てから実施します。
+
+1. PRマージ後、本番反映（`scripts/deploy-local.sh`、Human Gate）で本番worktreeへ`scripts/deploy-staging.sh`を反映する
+2. 本番worktreeで上記「Human Gate 5」の`sudo install`と`sudo systemctl daemon-reload`を実行する（この時点では稼働中プロセスは旧worktreeのまま動き続ける）
+3. `bash scripts/deploy-staging.sh`を実行する。専用ランタイムの構築・`current`切替・Stagingのみの再起動・health検証まで行う
+4. `bash scripts/check-staging-readiness.sh`がexit 0であること、本番・MVPの`/api/health`が変わっていないことを確認する
+
+失敗した場合、`deploy-staging.sh`は自動で`current`を直前へ戻します。初回で戻し先が無い場合は`current`を削除してStagingを停止します（本番・MVPには影響しません）。旧ユニットへ戻す場合は`WorkingDirectory`を本番worktreeへ戻して`daemon-reload`し、Stagingサービスを再起動します（切り戻しもHuman Gate）。
 
 ## 8. Human Gate 6: 復元ドリルの初回実行
 
@@ -310,16 +367,19 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 
 ## 10. 検証チェックリスト
 
-すべて満たした場合にのみ「Staging構築完了」とします。
+すべて満たした場合にのみ「Staging構築完了」とします。2026-10-16にオーナーの認可「私が全部実行する」のもとCTOが**Human Gate 3〜6を実施**し、**Gate 7も一部（Readiness全項目OK、公開URL 302、本番/MVP不変）まで完了**しました。2026-10-23には[ADR-0006](../adr/ADR-0006-staging-independent-release-channel.md)の**独立リリースチャネルへ移行**し、初回の先行デプロイと受入を完了しています（**受入記録: [Staging受入記録 2026-10-23](staging-acceptance-2026-10-23.md)**。以下の実測値は同日08:45〜08:47時点）。**本番・MVPへの反映（`scripts/deploy-local.sh`、別のHuman Gate）も同日09:01〜09:02 JSTに完了**し、以降は本番・MVP・Stagingとも`dd4bddb…`を配信しています。残るのはAccess Service Tokenを使う`npm run test:e2e:staging`（オーナー実施）のみです。
 
-- [ ] ローカルhealth: `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名`mirai_web_cad_staging`、`deploy.commit`が配信中のcommitと一致
-- [ ] DB名: `staging.env`の`DATABASE_URL`のDB名が`mirai_web_cad_staging`、`staging-backup.env`の`RESTORE_DATABASE_URL`のDB名が`mirai_web_cad_staging_recovery`
-- [ ] `npm run db:check`がStaging envで成功する
-- [ ] 公開URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`が未認証でAccessログインへ302。bypass policyが存在せず、許可は`kensan1969@gmail.com`のみ
-- [ ] 本番・MVPへ影響なし: `curl -fsS http://127.0.0.1:18812/api/health`と`http://127.0.0.1:18813/api/health`が変更なく成功し、本番・MVPの公開URLが従来どおり動作する
-- [ ] タイマー: backup/backup-check/monitor/restore-drillの4タイマーが`enabled`かつ`active (waiting)`
-- [ ] ジョブ初回成功: バックアップ・鮮度検査・復元ドリル・監視がそれぞれ1回以上成功している
-- [ ] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した
+- [x] ローカルhealth: `curl -fsS http://127.0.0.1:18814/api/health`が`ok: true`、`db.mode: connected`、接続DB名`mirai_web_cad_staging`、`auth.mode: access`。配信中commitは`11db0b8`（独立リリース移行前の2026-10-16時点。共有worktreeの`scripts/serve-production.mjs`が配信し、worktreeは`main`より14コミット遅れ）（**2026-10-16のGate 3〜5で達成済み**）。2026-10-23の受入ではStagingは`625e7c3`を配信（[受入記録](staging-acceptance-2026-10-23.md)）
+- [x] DB名: `staging.env`の`DATABASE_URL`のDB名が`mirai_web_cad_staging`、`staging-backup.env`の`RESTORE_DATABASE_URL`のDB名が`mirai_web_cad_staging_recovery`（**2026-10-16のGate 3・4で達成済み**）
+- [x] `npm run db:verify`がStaging envで成功し、`tables=9 seed=1`（**2026-10-16のGate 4で達成済み**。`db:check`も同envで成功）
+- [x] 公開URL: `https://mirai-web-cad-stg.mirai-dx-platform.com/`が未認証でAccessログインへ302。bypass policyが存在せず、許可は`kensan1969@gmail.com`のみ（**2026-10-16のGate 1・2で達成済み**）
+- [x] 本番・MVPへ影響なし: `curl -fsS http://127.0.0.1:18812/api/health`と`http://127.0.0.1:18813/api/health`が変更なく成功し、本番・MVPの公開URLが従来どおり動作する（2026-10-16実測: 本番`/api/health`=200、MVP`/`=302で不変。Tunnel再起動時の短時間中断は解消済み）
+- [x] タイマー: backup/backup-check/monitor/restore-drillの4タイマーが`enabled`かつ`active (waiting)`（**2026-10-16のGate 5で達成済み**）
+- [x] 独立リリース（移行と先行デプロイ）: `systemctl show -p WorkingDirectory --value mirai-web-cad-staging.service`が`/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`、`readlink ~/.local/share/mirai-web-cad/staging-runtime/current`が`releases/<対象commit>`、`/api/health`の`deploy.commit`と`deploy.distCommit`が対象commitと一致し、本番/MVPは別のcommitのまま。`bash scripts/check-staging-readiness.sh`がexit 0（**2026-10-23の先行デプロイで達成**。受入時点はStaging=`625e7c3…`、本番/MVP=`246b88a…`。最終状態はStaging=`dd4bddb…`。[受入記録](staging-acceptance-2026-10-23.md)）
+- [x] 独立リリース（本番反映後の不変性）: `scripts/deploy-local.sh`を実行してもStagingが再起動されないこと。**2026-10-23の本番反映（09:01〜09:02 JST）で、Stagingの`ActiveEnterTimestamp`が先行デプロイ時の`09:01:00 JST`のまま**（本番デプロイ完了は09:01:5x）で、`current`の向き先と配信commitは本番デプロイでは変わらなかった。3環境healthは本番・MVP・Stagingとも`ok=true`/`deploy.distCommit=dd4bddb…`（[受入記録](staging-acceptance-2026-10-23.md) §4.1・§5.2）
+- [x] ジョブ初回成功: バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は2026-10-16に成功済み。**監視（`mirai-web-cad-staging-monitor.service`）は2026-10-23 08:47の手動実行でsuccess**（`service health check ok: local API, database=mirai_web_cad_staging, Access redirect required=yes`。[受入記録](staging-acceptance-2026-10-23.md)）。2026-10-16時点の`exit 127`は本番worktreeが古く`scripts/check-staging-health.sh`が無かったためで、同worktreeが`78dd2d3`へ更新されて解消した（Issue #162で追跡していた事象）。**2026-10-23 09:13に監視・バックアップ・鮮度検査・復元ドリルの4ユニットを独立ランタイムの`current`へ移行**し、4ジョブとも手動実行で成功した（[受入記録](staging-acceptance-2026-10-23.md) §4.2）。以降は本番デプロイに依存しない
+- [x] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した（Gate 1・2の実施内容は§3・§4と`state.json`へ記録済み。Gate 3〜7の実施記録は通知Issue #163・#164を証跡付きでclose済み。2026-10-23の独立リリース受入は[受入記録](staging-acceptance-2026-10-23.md)と`state.json`へ記録した）
+- [ ] `npm run test:e2e:staging`（Access Service TokenでStaging公開URLを認証してdesktop/mobileを検証）: **オーナー実施待ち**。テスト専用のService Tokenをローカルで作成し、テスト直後にpolicyとtokenの両方を削除する必要がある（値はGit・ログ・チャットへ出さない。§12参照）。2026-10-16・2026-10-23時点とも未実施（2026-10-23の受入E2Eは`--local`のみ）
 
 ## 11. 本番・MVPとの分離境界（再確認）
 
@@ -327,6 +387,7 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 
 - Stagingは専用DB`mirai_web_cad_staging`のみを読み書きし、本番・MVPのDBへ接続しない（`db:check`の接続DB名とhealthで検証）
 - 本番・MVPと別のsystemdユニット・別のenvファイル・別のバックアップディレクトリを持つ
+- Stagingは本番・MVPと別のランタイム（`~/.local/share/mirai-web-cad/staging-runtime`、`releases/<sha>`+`current`）を持ち、Stagingの反映は`scripts/deploy-staging.sh`だけが行う。本番・MVPの`scripts/deploy-local.sh`はStagingの`dist`/`node_modules`/サービスに触れない
 - Stagingからの本番データ参照は行わない。実データ形状が必要な場合は`seeds/demo.sql`または合成データを使う
 - 本番・MVPのDNS/Access/Ruleset設定を変更しない。Terraformの`enable_management`は`false`を維持し、import planが無差分になるまでapplyしない
 - Stagingのバックアップ保持期間は14日。オフサイト転送（R2）の対象には当面含めない（本番・MVPのみ）
@@ -337,10 +398,10 @@ Human Gate 1〜7を進める前後で、次の2つを何度でも繰り返し実
 
 | コマンド | 用途 | 期待結果 |
 | --- | --- | --- |
-| `bash scripts/check-staging-readiness.sh` | ホストの現状（ユニットの設置・enable・active、envファイルの存在と`0600`、アプリDB/隔離DBの存在、ローカルhealth（18814）、公開URLのAccess境界、`deploy-local.sh`のStaging対応）を項目ごとに`[OK]`/`[FAIL]`で報告する | 未構築の間は「Staging環境は未構築です」を表示して**exit 0**。構築を始めた後に必須項目が欠けている場合だけ**exit 1** |
+| `bash scripts/check-staging-readiness.sh` | ホストの現状（ユニットの設置・enable・active・`WorkingDirectory`、envファイルの存在と`0600`、アプリDB/隔離DBの存在、ローカルhealth（18814）、公開URLのAccess境界、`deploy-staging.sh`と`staging-runtime/current`）を項目ごとに`[OK]`/`[FAIL]`で報告する | 未構築の間は「Staging環境は未構築です」を表示して**exit 0**。構築を始めた後に必須項目が欠けている場合だけ**exit 1** |
 | `E2E_CF_ACCESS_CLIENT_ID=... E2E_CF_ACCESS_CLIENT_SECRET=... npm run test:e2e:staging` | Access Service TokenでStaging公開URLを認証し、desktop/mobileの主要画面を検証する | 全ケース成功でexit 0 |
 
-`scripts/check-staging-readiness.sh`は秘密値を出力しません。envファイルの確認もキー名（`grep -o '^[A-Z_]*='`）だけを表示し、値は画面に出しません。接続先は環境ファイルを`source`せず、`deploy-local.sh`と同じく`sed`で必要な1変数だけを取り出します。
+`scripts/check-staging-readiness.sh`は秘密値を出力しません。envファイルの確認もキー名（`grep -o '^[A-Z_]*='`）だけを表示し、値は画面に出しません。接続先は環境ファイルを`source`せず、`deploy-staging.sh`と同じく`sed`で必要な1変数だけを取り出します。
 
 ### Access Service Tokenを使うE2Eの手順（テスト時のみ）
 

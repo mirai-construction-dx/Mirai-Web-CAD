@@ -10,7 +10,7 @@ OnFailure=mirai-web-cad-notify-failure@%n.service
 Type=oneshot
 User=kensan
 Group=kensan
-WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
+WorkingDirectory=/home/kensan/.local/share/mirai-web-cad/staging-runtime/current
 EnvironmentFile=/home/kensan/.config/mirai-web-cad/staging-backup.env
 Environment=PG_BIN=/usr/lib/postgresql/16/bin
 Environment=BACKUP_DIR=/var/backups/mirai-web-cad/staging-postgres

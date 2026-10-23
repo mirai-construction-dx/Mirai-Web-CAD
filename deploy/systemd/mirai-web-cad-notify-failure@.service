@@ -13,8 +13,13 @@ WorkingDirectory=/home/kensan/Projects/Mirai-Construction-DX/Mirai-Web-CAD
 Environment=NOTIFY_TOKEN_FILE=/home/kensan/.config/codip/bot.env
 Environment=NOTIFY_TOKEN_VARIABLE=MIRAI_BOT_TOKEN
 Environment=NOTIFY_REPO=mirai-construction-dx/Mirai-Web-CAD
+# 送れなかった通知を残す場所。ProtectSystem=strict でも StateDirectory だけは書ける。
+Environment=NOTIFY_STATE_DIR=/var/lib/mirai-web-cad
 Environment=PATH=/home/kensan/.npm-global/bin:/home/kensan/.nvm/versions/node/v22.22.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/env node scripts/notify-failure.mjs %i
+
+StateDirectory=mirai-web-cad
+StateDirectoryMode=0700
 
 NoNewPrivileges=true
 PrivateTmp=true

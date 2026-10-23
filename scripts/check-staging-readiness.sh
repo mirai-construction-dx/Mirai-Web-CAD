@@ -16,7 +16,8 @@
 #   (3) アプリDBと復元用隔離DBが存在すること(sedで解決したURLで接続、sourceはしない)
 #   (4) ローカルhealth(18814)が ok / db.mode=connected / 接続DB名=mirai_web_cad_staging
 #   (5) 公開URLがAccessログインへ302すること
-#   (6) deploy-local.shがStaging(3系統目)へ対応していること
+#   (6) Stagingが独立リリース(deploy-staging.sh)で配信される構成になっていること
+#       (専用ランタイムのcurrent・ユニットのWorkingDirectory)
 #
 # 依存: bash + curl + psql のみ(jq/node不要)。
 set -Eeuo pipefail
@@ -30,7 +31,8 @@ app_db="mirai_web_cad_staging"
 recovery_db="mirai_web_cad_staging_recovery"
 app_env="$HOME/.config/mirai-web-cad/staging.env"
 backup_env="$HOME/.config/mirai-web-cad/staging-backup.env"
-deploy_script="scripts/deploy-local.sh"
+deploy_staging_script="scripts/deploy-staging.sh"
+runtime_current="${STAGING_RUNTIME_ROOT:-$HOME/.local/share/mirai-web-cad/staging-runtime}/current"
 
 fail=0
 provisioned=0
@@ -86,9 +88,35 @@ if command -v systemctl >/dev/null 2>&1 && systemctl cat "$service" >/dev/null 2
   else
     fail_item "activeではありません(未起動または起動失敗)"
   fi
+  # 独立リリース: 本番ツリーではなく、deploy-staging.shが切り替えるcurrentから配信すること。
+  working_dir="$(systemctl show -p WorkingDirectory --value "$service" 2>/dev/null || true)"
+  if [[ "$working_dir" == "$runtime_current" ]]; then
+    ok "WorkingDirectory=$runtime_current"
+  else
+    fail_item "WorkingDirectoryが独立ランタイムではありません(=${working_dir:-unknown}。Human Gate 5でユニットを再配置)"
+  fi
 else
   skip "ユニット未設置(Human Gate 5: /etc/systemd/system への配置とenable)"
 fi
+
+# 定期ジョブ(monitor/backup/backup-check/restore-drill)も、本番worktreeではなく
+# 独立ランタイムのcurrentからscripts/を読むこと(ADR-0006)。
+for unit in \
+  mirai-web-cad-staging-monitor.service \
+  mirai-web-cad-staging-backup.service \
+  mirai-web-cad-staging-backup-check.service \
+  mirai-web-cad-staging-restore-drill.service; do
+  if command -v systemctl >/dev/null 2>&1 && systemctl cat "$unit" >/dev/null 2>&1; then
+    unit_working_dir="$(systemctl show -p WorkingDirectory --value "$unit" 2>/dev/null || true)"
+    if [[ "$unit_working_dir" == "$runtime_current" ]]; then
+      ok "${unit} のWorkingDirectory=$runtime_current"
+    else
+      fail_item "${unit} のWorkingDirectoryが独立ランタイムではありません(=${unit_working_dir:-unknown}。ユニット再配置が必要)"
+    fi
+  else
+    skip "${unit} が未設置"
+  fi
+done
 
 # (2) envファイルの存在とmode 0600。値は出さず、キー名だけを表示する。
 echo "2) envファイル(存在・mode 0600・キー名のみ表示)"
@@ -164,7 +192,9 @@ if [[ -n "$health_json" ]]; then
   else
     fail_item "ok=trueではありません(status=degraded/503の可能性)"
   fi
-  db_json="$(printf '%s' "$health_json" | grep -oE '"db"[[:space:]]*:[[:space:]]*\{[^}]*\}' | head -n 1 || true)"
+  # healthは整形済み(複数行)JSONで返るため、改行を除去してから部分一致で取り出す(改善: 複数行JSONでdb.modeを取り違えない)。
+  health_flat="$(printf '%s' "$health_json" | tr -d '\n')"
+  db_json="$(printf '%s' "$health_flat" | grep -oE '"db"[[:space:]]*:[[:space:]]*\{[^}]*\}' | head -n 1 || true)"
   db_mode="$(printf '%s' "$db_json" | grep -oE '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   db_name_health="$(printf '%s' "$db_json" | grep -oE '"database"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   if [[ "$db_mode" == "connected" ]]; then
@@ -215,14 +245,32 @@ else
   fi
 fi
 
-# (6) deploy-local.shがStaging(3系統目)へ対応していること(コード側は既に完了済み)。
-echo "6) deploy-local.shのStaging対応"
-if [[ -f "$deploy_script" ]] \
-  && grep -q "18814" "$deploy_script" \
-  && grep -q "mirai-web-cad-staging\.service" "$deploy_script"; then
-  ok "$deploy_script が $service とポート${port} に対応"
+# (6) Staging独立リリース: deploy-staging.shとruntime current(コード側はPRで完了済み)。
+#     本番反映は scripts/deploy-local.sh、Staging反映は scripts/deploy-staging.sh に分離されている。
+echo "6) deploy-staging.shとStaging独立ランタイム"
+if [[ -x "$deploy_staging_script" ]] \
+  && grep -q 'mirai-web-cad-staging\.service' "$deploy_staging_script" \
+  && grep -qE '18814|STAGING_PORT' "$deploy_staging_script"; then
+  ok "$deploy_staging_script が $service とポート${port} を独立デプロイ"
 else
-  fail_item "$deploy_script がStaging($service/ポート${port})へ未対応"
+  fail_item "$deploy_staging_script がStaging($service/ポート${port})の独立デプロイに未対応"
+fi
+if [[ -L "$runtime_current" ]]; then
+  provisioned=1
+  runtime_target="$(readlink "$runtime_current" 2>/dev/null || true)"
+  runtime_resolved="$(readlink -f "$runtime_current" 2>/dev/null || true)"
+  if [[ -n "$runtime_resolved" && -d "$runtime_resolved" \
+    && -f "$runtime_resolved/dist/build-info.json" && -f "$runtime_resolved/scripts/serve-production.mjs" ]]; then
+    runtime_commit="$(grep -oE '"commit"[[:space:]]*:[[:space:]]*"[^"]*"' "$runtime_resolved/dist/build-info.json" 2>/dev/null \
+      | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    ok "runtime current -> ${runtime_target:-unknown}(build commit=${runtime_commit:0:12})"
+  else
+    fail_item "runtime currentの向き先が不完全です(=${runtime_target:-unknown}。deploy-staging.shの再実行が必要)"
+  fi
+elif [[ "$installed" -eq 1 ]]; then
+  fail_item "runtime currentがありません(${deploy_staging_script} を実行してください)"
+else
+  skip "runtime current未作成(Human Gate 5後の初回独立デプロイで作成)"
 fi
 
 echo
@@ -236,4 +284,4 @@ if [[ "$fail" -ne 0 ]]; then
   echo "Staging readiness: 必須項目に未達があります。" >&2
   exit 1
 fi
-echo "Staging readiness ok: ユニット・env(0600)・DB・health・Access境界・deploy-local.sh対応を確認しました。"
+echo "Staging readiness ok: ユニット・env(0600)・DB・health・Access境界・deploy-staging.shとruntime currentを確認しました。"
