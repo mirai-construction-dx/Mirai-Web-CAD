@@ -173,14 +173,17 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 | 区分 | 連携 | 状態・根拠 |
 | --- | --- | --- |
 | **実装済み**(外部入力不要) | Core evidence形式への射影(エクスポート) | **射影アダプタを実装済み**(`src/core-evidence.js`・`scripts/export-core-evidence.mjs`、PR #178)。送信はせず、自DBの読み取りからJSON Linesを生成できる。ただしCore `ai_run/1`の`source_system`が`const "mcah"`のため**schema非準拠**(`schema: null`/`schema_status: "unsupported"`)。契約の取込み・lock固定・送信は、Coreのconsumer別evidence schema(または`source_system`制約の緩和)と署名付きRelease待ち(§4・[core-evidence-export.md](core-evidence-export.md)) |
-| **次に実装可能**(外部入力不要) | 連携状況の記録(`integration status`) | CDPの`docs/operations/integration-status.md`と同じ形式で、Web-CADが実測した接続状態を自リポジトリに記録できる。他システムへの接続を伴わない |
+| **実装済み** | 連携状況の記録(`GET /api/integration/status`) | 読み取り専用APIを実装済み(PR #185)。viewer以上、未認証401。Core/MCIP/CDE/MCPの準備状態と`core-lock`の有無を返し、外部呼び出し・DB書き込みをしない([integration-status.md](integration-status.md)) |
+| **実装済み** | Core release intake checker | SHA256SUMS・attestation・署名鍵・core-lockを検証する読み取り専用CLIを実装済み(PR #186)。v0.8.0は**NO-GO**(attestation 404・署名鍵空)([core-release-intake.md](core-release-intake.md)) |
+| **実装済み** | MCIP/CDEアダプタ設計・MCP契約ドラフト | 未設定時フェイルクローズドのクライアントとモックテストを実装済み(PR #184)。実接続・配線・公開はしない。MCPは読み取り専用ツール契約のドラフトのみ([integration-adapters.md](integration-adapters.md)・[mcp-tool-contract.md](mcp-tool-contract.md)) |
+| **実装済み** | Staging migrationリハーサル | 実Staging DBで`db:verify`→`db:check`を実行するスクリプトを実装済み(PR #185)。2026-10-23に実Staging DBで成功([staging-migration-rehearsal.md](../runbooks/staging-migration-rehearsal.md)) |
 | 同上 | 相関ID(`x-request-id`)の保存・伝搬 | `src/api-handler.js`は受け取って応答へ返すが、監査・AI Runへ保存していない(§2)。自DBのadditive migrationで実装可能 |
 | 同上 | 自環境の監視・Stagingの観測記録 | systemd timer・health・DB名の確認は実装済み(§6.8) |
 | **外部入力待ち** | Core成果物の取込み(`core-lock/`)と版宣言 | 署名・attestation付きReleaseが無い(`signing-keys.yaml`空、`/attestations`404)。条件: Coreが署名鍵(O-16)とattestationを有効化し、署名検証できるReleaseを公開する |
 | 同上 | MCIP案件IDの発番・配布 | MCIPに対外案件ID APIが無い(`V3.2整合性評価.md:14`)。条件: MCIPが発番APIと認可(Web-CADのclient登録)を提供する。Web-CADはadditive migrationで外部ID列を追加してから参照する |
 | 同上 | CDEへの承認済み版登録 | CDEにWeb-CAD向けの登録API・クライアント登録が無い(§6.4)。条件: CDEが受入APIと認証方式を設計・提供する |
 | 同上 | MCPサーバー公開 | Coreの`mcp_server_id`が`null`、`registries/mcp-allowlist.yaml`に`web-cad`が無い(§6.2)。条件: CoreでMCP契約を版管理しAllowlistへ登録したうえで、EntraのApp ID URI(`audience`)を確定する |
-| 同上 | Staging E2E(Access Service Token) | オーナーがテスト時だけService Tokenを発行する必要がある([Staging構築手順書](../runbooks/staging-bringup.md)§12)。トークン値はGit・ログへ出さない |
+| 同上 | Staging E2E(Access Service Token) | トークン非出力の自動ラッパー`scripts/run-staging-access-e2e.sh`を実装済み(PR #183、`--dry-run`確認済み)。実トークンでの実行はオーナーがテスト時だけ発行し、直後に削除する([Staging E2E](../runbooks/staging-e2e.md)§3)。トークン値はGit・ログへ出さない |
 | **第3段階まで実施しない** | MCIP案件IDを正本にすること(自採番の置換) | 台帳§4-7の決定どおり。API公開後に外部ID列を追加し、段階的に移行する |
 | 同上 | CDEへの確定版登録の本番運用 | API提供後も、承認フロー・版確定・証跡の設計が決まるまで本番運用しない |
 | 同上 | MCP公開とTool Gateway経由の実行 | 第3段階。ツール仕様・Allowlist・監査が揃うまで公開しない |
@@ -203,6 +206,6 @@ Staging環境([ADR-0005](../adr/ADR-0005-staging-environment.md))は**新しい�
 - MCIPの対外案件ID APIの発番形式・認可方式・提供時期。文書上の「未実装」を確認しただけで、実装計画は未確認。
 - CDEの承認済み版登録の受入設計(API・認証・データ形式)。CDE側の設計文書にはWeb-CAD向けの記載が無い。
 - CDE Stagingの公開疎通(DNS・connector・Accessログイン)。ローカルのhealthとコンテナ稼働だけを実測した。
-- Portfolio Pages本番(`mirai-web-cad.pages.dev`)が現在も配信されているか。catalogのPagesエントリは履歴として残し、現在の配信はTunnel側とする(PORT-OPS-009)。
-- Staging E2E(`npm run test:e2e:staging`)。Access Service Tokenがオーナー実施のため未実施。
+- Portfolio Pages本番(`mirai-web-cad.pages.dev`)が現在も配信されているか。catalogのPagesエントリは履歴として残し、現在の配信はTunnel側とする(PORT-OPS-010)。
+- Staging E2E(`npm run test:e2e:staging`)。トークン非出力の自動ラッパー(#183)は追加済みだが、実Access Service Tokenでの実行はオーナー手動のため未実施。
 - ArcSphereの後継連携(Mirai-Web-CADのAPI/MCP公開後)の時期と契約。凍結文書の記載のみで、実装は無い。

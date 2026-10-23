@@ -411,3 +411,12 @@ Human Gate 1〜7を進める前後で、次の2つを何度でも繰り返し実
 2. `E2E_CF_ACCESS_CLIENT_ID`・`E2E_CF_ACCESS_CLIENT_SECRET`へ発行値を渡して`npm run test:e2e:staging`を実行する（値はGit・ログ・チャットへ出さない）
 3. テスト直後に、追加した`service_auth` policyとService Tokenを削除する
 4. Staging Applicationの通常policyが`allow`かつ`Emails = kensan1969@gmail.com`のみに戻っていることを確認する
+
+### 追加の自動化（2026-10-23）
+
+| コマンド | 用途 |
+| --- | --- |
+| `bash scripts/run-staging-access-e2e.sh` | 公開境界→`npm run test:e2e:staging`→公開境界再確認。トークン値は出力せず、`env -i`で必要変数だけ子へ渡す。`--dry-run`で実行計画のみ表示。トークン未設定時はexit 78（ネットワークへ触れない）。トークン作成・policy変更はしない |
+| `bash scripts/rehearse-staging-migration.sh` | 実Staging DBで`db:verify`（migration適用＋seed）→`db:check`。DB名が`mirai_web_cad_staging`でなければ拒否。`--dry-run`あり。本番・MVP DBへは触れない（[手順](staging-migration-rehearsal.md)） |
+| `node scripts/check-core-release.mjs --tag v0.8.0` | Core ReleaseのSHA256SUMS・attestation・署名鍵・`core-lock`を確認し、GO/NO-GOを表示（[手順](../architecture/core-release-intake.md)） |
+| `curl -fsS http://127.0.0.1:18814/api/integration/status` | 認証必須のため未認証では401。連携準備状態の確認は認証済み経路で行う（[API](../architecture/integration-status.md)） |
