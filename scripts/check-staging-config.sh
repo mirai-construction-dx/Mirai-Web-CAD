@@ -91,8 +91,11 @@ require_line "$rd" '^Environment=EXPECTED_DATABASE=mirai_web_cad_staging$' 'EXPE
 
 # 定期ジョブ(oneshot)は失敗時にGitHub Issue通知へ接続する(ADR-0005 §5)。
 # 常駐サービス(staging.service)は本番・MVPと同じくRestart=on-failureで扱うため対象外。
+# あわせて、定期ジョブも本番worktreeではなく独立ランタイムのcurrentからscripts/を読む
+# ことを検査する(ADR-0006。本番ツリー更新に依存させない)。
 for f in "$bkp" "$bchk" "$mon" "$rd"; do
   require_line "$f" '^OnFailure=mirai-web-cad-notify-failure@%n\.service$' 'OnFailure=mirai-web-cad-notify-failure@%n.service'
+  require_line "$f" '^WorkingDirectory=/home/kensan/\.local/share/mirai-web-cad/staging-runtime/current$' '独立ランタイムの WorkingDirectory='
 done
 
 # 各timerは[Timer]で起動契機を持ち、timers.targetへ接続する。
