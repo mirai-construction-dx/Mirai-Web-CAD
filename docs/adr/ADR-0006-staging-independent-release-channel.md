@@ -75,7 +75,7 @@ ADR-0005 で Staging を追加し、2026-10-16 にホストへ構築した。Sta
 2. Stagingは本番・MVPと別のsystemd unit・envファイル・バックアップディレクトリ・作業ツリーを持つ。
 3. 本番・MVPのDNS/Access/Ruleset設定を変更しない。
 4. Stagingのバックアップは `/var/backups/mirai-web-cad/staging-postgres` に14日保持し、R2オフサイト転送の対象には当面含めない。
-5. 監視(`mirai-web-cad-staging-monitor.service`)とバックアップは、引き続き共有worktreeのスクリプトを使う。これらはStagingのAPI・DB・公開境界だけを検査し、本番・MVPを変更しない。Stagingランタイムのcommitと監視スクリプトの版がずれる可能性は、監視がHTTP/DB境界のみを見るため許容する。
+5. 監視(`mirai-web-cad-staging-monitor.service`)・バックアップ・鮮度検査・復元ドリルも、独立ランタイムの `current` にあるスクリプトを実行する。本番worktreeの更新に依存しない。これらはStagingのAPI・DB・公開境界・バックアップだけを扱い、本番・MVPを変更しない。
 
 ### 4. 変更する資産
 
@@ -99,9 +99,9 @@ ADR-0005 で Staging を追加し、2026-10-16 にホストへ構築した。Sta
 
 ## 受け入れ条件
 
-- [ ] Stagingだけをcommit Xへ更新し、本番・MVPがcommit Yのままであることをhealthで実測できる
-- [ ] `deploy-staging.sh` の失敗時にStagingが直前のcommitへ戻り、本番・MVPが変化しない
-- [ ] `scripts/check-staging-config.sh` がCIで成功し、`deploy-local.sh` がStagingを参照しないことを検査する
-- [ ] `scripts/check-staging-readiness.sh` がexit 0を維持する
-- [ ] Stagingの監視・バックアップ・復元ドリルが引き続き成功する
-- [ ] 本番デプロイ(`deploy-local.sh`)が本番+MVPだけを更新し、Stagingを再起動しない
+- [x] Stagingだけをcommit Xへ更新し、本番・MVPがcommit Yのままであることをhealthで実測できる（2026-10-23: Staging=`625e7c3` / 本番・MVP=`246b88a`。受入記録§5.1）
+- [x] `deploy-staging.sh` の失敗時にStagingが直前のcommitへ戻り、本番・MVPが変化しない（`tests/deploy-staging.test.js`のrollbackテスト）
+- [x] `scripts/check-staging-config.sh` がCIで成功し、`deploy-local.sh` がStagingを参照しないことを検査する
+- [x] `scripts/check-staging-readiness.sh` がexit 0を維持する（2026-10-23 09:13、5ユニットのWorkingDirectory=currentを確認）
+- [x] Stagingの監視・バックアップ・復元ドリルが引き続き成功する（2026-10-23 09:13、独立ランタイム移行後に4ジョブを手動実行して成功。受入記録§4.2）
+- [x] 本番デプロイ(`deploy-local.sh`)が本番+MVPだけを更新し、Stagingを再起動しない（2026-10-23: Stagingの`ActiveEnterTimestamp=09:01:00`のまま。受入記録§4.1）
