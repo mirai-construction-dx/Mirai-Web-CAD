@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { issueTitle, notifyFailure, readToken } from "../scripts/notify-failure.mjs";
+import { flushUndelivered, issueTitle, notifyFailure, readToken, recordUndelivered } from "../scripts/notify-failure.mjs";
 
 // scripts/notify-failure.mjs を、GitHub APIを模したローカルHTTPサーバーで検証する。
 const TOKEN = "test-token-not-real";
@@ -88,7 +88,7 @@ test("the CLI reports a failure without printing the token", async () => {
     writeFileSync(file, `MIRAI_BOT_TOKEN=${TOKEN}\n`);
     const script = new URL("../scripts/notify-failure.mjs", import.meta.url).pathname;
     const error = await promisify(execFile)(process.execPath, [script, "mirai-web-cad-backup.service"], {
-      env: { ...process.env, NOTIFY_TOKEN_FILE: file, NOTIFY_API_BASE: "http://127.0.0.1:9", NOTIFY_REPO: "o/r" }
+      env: { ...process.env, NOTIFY_TOKEN_FILE: file, NOTIFY_API_BASE: "http://127.0.0.1:9", NOTIFY_REPO: "o/r", NOTIFY_RETRY_DELAY_MS: "0" }
     }).catch((failure) => failure);
     assert.equal(error.code, 1);
     assert.match(error.stderr, /notify-failure failed \(mirai-web-cad-backup.service\)/);
@@ -118,4 +118,91 @@ test("an open notification issue on a later page is found instead of creating a 
     assert.deepEqual(outcome, { action: "commented", number: 5 });
     assert.deepEqual(requests.filter((entry) => entry.method === "POST").map((entry) => entry.url), ["/repos/o/r/issues/5/comments"]);
   });
+});
+
+// --- 再試行と未送信の永続化（Issue #168） -----------------------------------
+
+async function withFlakyGithub(statuses, fn) {
+  let calls = 0;
+  const server = createServer((request, response) => {
+    const status = statuses[Math.min(calls, statuses.length - 1)];
+    calls += 1;
+    if (request.method === "GET") {
+      response.writeHead(status, { "content-type": "application/json" });
+      return response.end(status === 200 ? JSON.stringify([]) : JSON.stringify({ message: "synthetic" }));
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ number: 77 }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await fn({ api: `http://127.0.0.1:${server.address().port}`, calls: () => calls });
+  } finally {
+    server.close();
+  }
+}
+
+test("a transient 502 is retried and the notification is delivered", async () => {
+  await withFlakyGithub([502, 200], async ({ api, calls }) => {
+    const outcome = await notifyFailure({ unit: "mirai-web-cad-backup.service", repo: "o/r", token: TOKEN, api, result: "Result=exit-code", retryDelaysMs: [0, 0] });
+    assert.deepEqual(outcome, { action: "created", number: 77 });
+    assert.ok(calls() >= 2, `expected a retry, calls=${calls()}`);
+  });
+});
+
+test("retries are bounded and the last error is reported", async () => {
+  await withFlakyGithub([502], async ({ api, calls }) => {
+    await assert.rejects(
+      () => notifyFailure({ unit: "mirai-web-cad-backup.service", repo: "o/r", token: TOKEN, api, result: "", retryDelaysMs: [0, 0] }),
+      /GitHub API GET .*: 502/
+    );
+    assert.equal(calls(), 3, "expected 1 attempt + 2 retries");
+  });
+});
+
+test("a 401 is not retried", async () => {
+  await withFlakyGithub([401], async ({ api, calls }) => {
+    await assert.rejects(
+      () => notifyFailure({ unit: "mirai-web-cad-backup.service", repo: "o/r", token: TOKEN, api, result: "", retryDelaysMs: [0, 0] }),
+      /: 401/
+    );
+    assert.equal(calls(), 1);
+  });
+});
+
+test("an undelivered notification is recorded and re-sent on the next run", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "notify-state-"));
+  try {
+    const marker = recordUndelivered("mirai-web-cad-backup.service", new Error("fetch failed"), dir);
+    assert.ok(marker && existsSync(marker));
+    assert.match(readFileSync(marker, "utf8"), /mirai-web-cad-backup\.service/);
+
+    await withGithub([], async ({ api, requests }) => {
+      const result = await flushUndelivered({ repo: "o/r", token: TOKEN, api, dir });
+      assert.equal(result.sent.length, 1);
+      assert.equal(result.failed.length, 0);
+    });
+    assert.equal(existsSync(marker), false, "a delivered notification must not be retried again");
+    assert.equal(readdirSync(dir).length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the CLI leaves a durable marker when delivery fails", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "notify-cli-state-"));
+  try {
+    const file = path.join(dir, "bot.env");
+    writeFileSync(file, `MIRAI_BOT_TOKEN=${TOKEN}\n`);
+    const state = path.join(dir, "state");
+    const script = new URL("../scripts/notify-failure.mjs", import.meta.url).pathname;
+    const error = await promisify(execFile)(process.execPath, [script, "mirai-web-cad-backup.service"], {
+      env: { ...process.env, NOTIFY_TOKEN_FILE: file, NOTIFY_API_BASE: "http://127.0.0.1:9", NOTIFY_REPO: "o/r", NOTIFY_RETRY_DELAY_MS: "0", NOTIFY_STATE_DIR: state }
+    }).catch((failure) => failure);
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /NOTIFY_UNDELIVERED: mirai-web-cad-backup\.service/);
+    assert.equal(readdirSync(state).filter((name) => name.startsWith("undelivered-")).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

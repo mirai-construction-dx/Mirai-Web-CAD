@@ -96,7 +96,7 @@ GitHub正本は`mirai-construction-dx/Mirai-Web-CAD`です。2026-08-26に`Const
 | 用途 | URL | 状態 |
 | --- | --- | --- |
 | MVP（今回の確認用） | `https://mirai-web-cad-mvp.mirai-dx-platform.com/` | Cloudflare Accessでサイト全体を保護。`kensan1969@gmail.com`だけログイン可能。データはローカルPostgreSQLの専用DB`mirai_web_cad_mvp`へ保存 |
-| Staging（リリース候補の検証用、構築準備中） | `https://mirai-web-cad-stg.mirai-dx-platform.com/` | **未公開**。本番と同一構成でリリース候補・migration・デプロイ手順を検証する環境。設計は[ADR-0005](docs/adr/ADR-0005-staging-environment.md)で確定したが、ホスト未反映（DNS・Access・秘密情報・systemd・DBはオーナーY/N待ち）。データは使い捨てで本番へ昇格しない |
+| Staging（リリース候補の検証用） | `https://mirai-web-cad-stg.mirai-dx-platform.com/` | 本番と同一構成でリリース候補・migration・デプロイ手順を本番反映前に検証する環境。設計は[ADR-0005](docs/adr/ADR-0005-staging-environment.md)、2026-10-23に[ADR-0006](docs/adr/ADR-0006-staging-independent-release-channel.md)で本番・MVPから独立したランタイム（`~/.local/share/mirai-web-cad/staging-runtime`）へ先行デプロイする方式へ移行（[受入記録](docs/runbooks/staging-acceptance-2026-10-23.md)）。Stagingの反映は`scripts/deploy-staging.sh`、本番・MVPの反映は`scripts/deploy-local.sh`。未認証アクセスはAccessログインへ302。データは使い捨てで本番へ昇格しない |
 | Custom Domain(本番) | `https://mirai-web-cad.mirai-dx-platform.com/` | Cloudflare Tunnel経由でローカル常駐サーバーへ配信。SPAと公開デモは匿名閲覧可(匿名応答から操作者のメールアドレス等は除く)。任意図面と全更新APIはCloudflare Accessで保護。未認証アクセスはエッジ層で302(Accessログインへのリダイレクト)、アプリ層に到達した場合は401 |
 | Cloudflare Pages(参考、ロールバック用) | `https://mirai-web-cad.pages.dev/` | mainマージでは更新されない。SPAのみ200、`/api`は移行前のコードのままで機能しない |
 
@@ -178,7 +178,9 @@ RESTORE_DATABASE_URL="postgresql://...empty-db" BACKUP_FILE="artifacts/cad.dump"
 - [運用・復旧メモ](docs/operations.md)
 - [ローカルデプロイ運用メモ](docs/deployment-local.md)
 - [Staging構築手順書](docs/runbooks/staging-bringup.md)
+- [Staging受入記録 2026-10-23](docs/runbooks/staging-acceptance-2026-10-23.md)
 - [Staging環境の設計(ADR-0005)](docs/adr/ADR-0005-staging-environment.md)
+- [Staging独立リリースの設計(ADR-0006)](docs/adr/ADR-0006-staging-independent-release-channel.md)
 - [API/DBメモ](docs/api-db.md)
 - [テスト方針](docs/testing.md)
 - [要件・設計トレーサビリティ](docs/mvp-traceability.md)
