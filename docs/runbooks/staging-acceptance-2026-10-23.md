@@ -100,6 +100,21 @@ Stagingでの受入が完了した後、本番・MVPへ反映しました。反�
 | 16 | 反映後のStaging検証 | `check-staging-readiness.sh`全項目OK、公開境界はStaging 302（Access）・本番`/api/health`=200・MVP 302、`mirai-web-cad-staging-monitor.service` success（09:01:53） | OK |
 | 17 | `db:check`の実行範囲 | 本番デプロイ中の`db:check`は本番・MVPの2回のみで、Staging DBへの`db:check`は実行されていない | OK |
 
+### 4.2 定期ジョブの独立ランタイム化（2026-10-23 09:13 JST）
+
+ADR-0006の残課題だった「監視・バックアップ・鮮度検査・復元ドリルが本番worktreeのスクリプトに依存する」問題を解消しました。4ユニットの`WorkingDirectory`を独立ランタイムの`current`へ変更し、ユニット再配置・`daemon-reload`後に4ジョブを手動実行して成功を確認しました。
+
+| # | 検証 | 実測値 | 判定 |
+| --- | --- | --- | --- |
+| 18 | `WorkingDirectory`（4ユニット） | `mirai-web-cad-staging-{monitor,backup,backup-check,restore-drill}.service` すべて `/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`（`systemctl show -p WorkingDirectory`） | OK |
+| 19 | 監視 | `service health check ok: local API, database=mirai_web_cad_staging, Access redirect required=yes`（09:13:01） | OK |
+| 20 | バックアップ | `backup-local ok: /var/backups/mirai-web-cad/staging-postgres/mirai-web-cad-20261023T001321Z.dump`（manifest付き、09:13:22） | OK |
+| 21 | 鮮度検査 | `backup freshness check ok: .../mirai-web-cad-20261022T185358Z.dump (5h old, 20008 bytes)`（09:13:03） | OK |
+| 22 | 復元ドリル | `restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery, manifest counts/latest versions match, JSONB shapes valid; recovery data will be cleared`（09:13:25） | OK |
+| 23 | 本番・MVPへの影響 | 本番/MVPのサービス・DB・worktreeは変更なし。`check-staging-readiness.sh`は5ユニットすべての`WorkingDirectory`を`[OK]`で確認 | OK |
+
+これにより、本番worktreeの更新状況にかかわらず、Stagingの定期ジョブはStagingのリリース（`current`）と同じ版のスクリプトを実行します。ユニットの旧版はホスト側にバックアップ済みです。
+
 ## 5. Stagingと本番/MVPの分離証明
 
 分離の根拠を、**受入時点（08:47）**と**本番反映後（09:02）**の2つの実測で示します。
@@ -144,18 +159,17 @@ Stagingでの受入が完了した後、本番・MVPへ反映しました。反�
 | `deploy-staging.sh`の手順3以降（`current`切替・再起動・health検証）で失敗 | スクリプトのERR trapが`current`を直前の向き先へ戻し、Stagingサービスを再起動してhealthを再検証する。初回で戻し先が無い場合は`current`を削除してStagingを停止する | なし |
 | 受入で問題が見つかった（デプロイ自体は成功） | `bash scripts/deploy-staging.sh <直前の正常commit>`でStagingだけを戻す。Stagingランタイムは独立しているため本番・MVPのサービスは再起動しない | なし |
 | systemdユニット（`WorkingDirectory`）の切り戻し | 旧ユニット（本番worktree参照）へ戻して`daemon-reload`・Staging再起動。**systemd設定の変更にあたるためHuman GateとしてオーナーのY/Nを得る** | なし |
-| Staging定期ジョブ（backup/backup-check/restore-drill/monitor） | 本番ツリーのスクリプトを実行するため、Stagingのロールバックでは変更されない。必要なら`systemctl start`で個別に再実行 | なし |
+| Staging定期ジョブ（backup/backup-check/restore-drill/monitor） | 独立ランタイムの`current`にあるスクリプトを実行する（2026-10-23 09:13移行）。`current`を戻せば次回実行から旧リリースのスクリプトになる。手動で即時確認する場合は`systemctl start`で個別に再実行する | なし |
 
 本記録の受入（§4）は本番・MVPを変更していません。その後の**本番反映（§4.1、2026-10-23 09:01〜09:02 JST）は完了済み**で、失敗時の切り戻しは`deploy-local.sh`の自動ロールバックと[ローカルデプロイ運用メモ](../deployment-local.md)の手順に従います。Stagingは独立ランタイムのため、本番反映のロールバックでもStagingの`current`とサービスは影響を受けません。逆にStagingだけを戻す場合は§6の`deploy-staging.sh <直前の正常commit>`を使い、本番・MVPには触れません。
 
 ## 7. 残課題
 
-本番反映は2026-10-23 09:01〜09:02 JSTに完了しました（§4.1、最終commit `dd4bddb`）。残課題は次の2点です。
+本番反映は2026-10-23 09:01〜09:02 JSTに完了しました（§4.1、最終commit `dd4bddb`）。定期ジョブの独立ランタイム化（§4.2）も完了しており、残課題は次の1点です。
 
 | # | 残課題 | 現状と次アクション |
 | --- | --- | --- |
-| 1 | **staging-monitorのスクリプト依存** | 監視・バックアップ・復元ドリルは本番ツリーのスクリプト（`scripts/check-staging-health.sh`等）を実行するため、スクリプトの更新は本番デプロイ後に反映される（ADR-0006 §3-5、[deployment-local.md](../deployment-local.md)の既知の制約）。2026-10-16時点は本番worktreeが古く`exit 127`だったが、2026-10-23は本番worktreeに同スクリプトが存在し、手動実行はsuccess（08:47・09:01:53の2回実測）。監視ユニットの`WorkingDirectory`を独立ランタイムへ移すかは**未決**（別途判断） |
-| 2 | **Service Tokenを使う公開URL E2Eが未実施** | 今回のE2Eは`--local`（トークン不要）のみ。公開URLの画面検証（`npm run test:e2e:staging`、Access Service Token）はトークン値がログに残らないようオーナーがローカルで実施する必要があり、**2026-10-23時点でも未実施**（[staging-e2e.md](staging-e2e.md) §3、[staging-bringup.md](staging-bringup.md) §12） |
+| 1 | **Service Tokenを使う公開URL E2Eが未実施** | 今回のE2Eは`--local`（トークン不要）のみ。公開URLの画面検証（`npm run test:e2e:staging`、Access Service Token）はトークン値がログに残らないようオーナーがローカルで実施する必要があり、**2026-10-23時点でも未実施**（[staging-e2e.md](staging-e2e.md) §3、[staging-bringup.md](staging-bringup.md) §12） |
 
 次回以降のリリースでも「Staging先行デプロイ→受入→本番反映」の順序を守ります。今回は受入（08:45〜08:47、`625e7c3`）の後にmainが`dd4bddb`（PR #180まで）へ進んだため、Stagingへ`dd4bddb`を先行デプロイしてから本番・MVPへ反映しました（§4.1）。
 

@@ -99,6 +99,25 @@ else
   skip "ユニット未設置(Human Gate 5: /etc/systemd/system への配置とenable)"
 fi
 
+# 定期ジョブ(monitor/backup/backup-check/restore-drill)も、本番worktreeではなく
+# 独立ランタイムのcurrentからscripts/を読むこと(ADR-0006)。
+for unit in \
+  mirai-web-cad-staging-monitor.service \
+  mirai-web-cad-staging-backup.service \
+  mirai-web-cad-staging-backup-check.service \
+  mirai-web-cad-staging-restore-drill.service; do
+  if command -v systemctl >/dev/null 2>&1 && systemctl cat "$unit" >/dev/null 2>&1; then
+    unit_working_dir="$(systemctl show -p WorkingDirectory --value "$unit" 2>/dev/null || true)"
+    if [[ "$unit_working_dir" == "$runtime_current" ]]; then
+      ok "${unit} のWorkingDirectory=$runtime_current"
+    else
+      fail_item "${unit} のWorkingDirectoryが独立ランタイムではありません(=${unit_working_dir:-unknown}。ユニット再配置が必要)"
+    fi
+  else
+    skip "${unit} が未設置"
+  fi
+done
+
 # (2) envファイルの存在とmode 0600。値は出さず、キー名だけを表示する。
 echo "2) envファイル(存在・mode 0600・キー名のみ表示)"
 app_env_present=0

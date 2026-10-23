@@ -37,7 +37,7 @@
 - systemdユニット定義: `deploy/systemd/mirai-web-cad-staging.service`、`mirai-web-cad-staging-backup.service`/`.timer`、`mirai-web-cad-staging-backup-check.service`/`.timer`、`mirai-web-cad-staging-monitor.service`/`.timer`、`mirai-web-cad-staging-restore-drill.service`/`.timer`
 - 監視スクリプト: `scripts/check-staging-health.sh`（ローカルAPI、接続DB名、公開URLのAccess境界を検査）
 - デプロイスクリプト: `scripts/deploy-staging.sh`（Staging専用ランタイム `~/.local/share/mirai-web-cad/staging-runtime` の `releases/<sha>` へ構築し、`current` symlinkを原子切替してStagingだけを再起動する独立デプロイ）。本番・MVPの`scripts/deploy-local.sh`はStagingに触れない
-- systemdユニットの`WorkingDirectory`は `~/.local/share/mirai-web-cad/staging-runtime/current`（本番ツリーを共有しない）
+- systemdユニットの`WorkingDirectory`は `~/.local/share/mirai-web-cad/staging-runtime/current`（本番ツリーを共有しない。常駐サービス・定期ジョブとも）
 - Cloudflare定義: `infra/cloudflare/`のStaging定義（変数化。`enable_management=false`は据え置き、import planが無差分になるまでapplyしない）
 - CI: Staging構成の検査(`scripts/check-staging-config.sh`、CIジョブ「Staging Configuration」。ユニットの存在・必須ディレクティブ・`WorkingDirectory`・`deploy-staging.sh`の独立ランタイム方式・`deploy-local.sh`がStagingへ触れないこと・DB名の一致・本番専用経路へ未配線を検査)
 - 文書: ADR-0005、本書、[ローカルデプロイ運用メモ](../deployment-local.md)、[運用・復旧メモ](../operations.md)、README、`state.json`
@@ -252,7 +252,7 @@ DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' ~/.config/mirai-web-cad/staging.env
 > ```
 
 > [!NOTE]
-> 監視（`mirai-web-cad-staging-monitor.service`）は`WorkingDirectory`の作業ツリー（本番ツリー）にある`scripts/check-staging-health.sh`を実行します。Staging本体は独立ランタイムから配信されますが、監視スクリプトは本番ツリー側の更新に追随するため、**スクリプトの更新は本番反映（`scripts/deploy-local.sh`）後に反映されます**（2026-10-16実測: ツリーがmainより14コミット遅れで`exit 127`。2026-10-23は本番worktreeが同スクリプトを含む`78dd2d3`まで更新されており、手動実行はsuccess。[受入記録](staging-acceptance-2026-10-23.md)）。監視ユニットの`WorkingDirectory`を独立ランタイムへ移すかは別途判断します（未決）。
+> 監視（`mirai-web-cad-staging-monitor.service`）・バックアップ・鮮度検査・復元ドリルも、`WorkingDirectory`は独立ランタイムの`current`です。各ユニットはリリース内の`scripts/`（`check-staging-health.sh`等）を実行するため、**本番worktreeの更新に依存しません**（2026-10-23に移行。同日09:13に4ジョブを手動実行し、すべて成功。[受入記録](staging-acceptance-2026-10-23.md) §4.2）。
 
 **コマンド**
 
@@ -377,7 +377,7 @@ journalctl -u mirai-web-cad-staging-monitor.service -n 20
 - [x] タイマー: backup/backup-check/monitor/restore-drillの4タイマーが`enabled`かつ`active (waiting)`（**2026-10-16のGate 5で達成済み**）
 - [x] 独立リリース（移行と先行デプロイ）: `systemctl show -p WorkingDirectory --value mirai-web-cad-staging.service`が`/home/kensan/.local/share/mirai-web-cad/staging-runtime/current`、`readlink ~/.local/share/mirai-web-cad/staging-runtime/current`が`releases/<対象commit>`、`/api/health`の`deploy.commit`と`deploy.distCommit`が対象commitと一致し、本番/MVPは別のcommitのまま。`bash scripts/check-staging-readiness.sh`がexit 0（**2026-10-23の先行デプロイで達成**。受入時点はStaging=`625e7c3…`、本番/MVP=`246b88a…`。最終状態はStaging=`dd4bddb…`。[受入記録](staging-acceptance-2026-10-23.md)）
 - [x] 独立リリース（本番反映後の不変性）: `scripts/deploy-local.sh`を実行してもStagingが再起動されないこと。**2026-10-23の本番反映（09:01〜09:02 JST）で、Stagingの`ActiveEnterTimestamp`が先行デプロイ時の`09:01:00 JST`のまま**（本番デプロイ完了は09:01:5x）で、`current`の向き先と配信commitは本番デプロイでは変わらなかった。3環境healthは本番・MVP・Stagingとも`ok=true`/`deploy.distCommit=dd4bddb…`（[受入記録](staging-acceptance-2026-10-23.md) §4.1・§5.2）
-- [x] ジョブ初回成功: バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は2026-10-16に成功済み。**監視（`mirai-web-cad-staging-monitor.service`）は2026-10-23 08:47の手動実行でsuccess**（`service health check ok: local API, database=mirai_web_cad_staging, Access redirect required=yes`。[受入記録](staging-acceptance-2026-10-23.md)）。2026-10-16時点の`exit 127`は本番worktreeが古く`scripts/check-staging-health.sh`が無かったためで、同worktreeが`78dd2d3`へ更新されて解消した（Issue #162で追跡していた事象）。独立リリース移行後も監視ユニットは本番ツリーを参照するため、監視スクリプトの更新は本番デプロイ後に反映される
+- [x] ジョブ初回成功: バックアップ（`backup-local ok`、20008 bytes）・鮮度検査・復元ドリル（`restore drill ok: source=mirai_web_cad_staging, recovery=mirai_web_cad_staging_recovery`）は2026-10-16に成功済み。**監視（`mirai-web-cad-staging-monitor.service`）は2026-10-23 08:47の手動実行でsuccess**（`service health check ok: local API, database=mirai_web_cad_staging, Access redirect required=yes`。[受入記録](staging-acceptance-2026-10-23.md)）。2026-10-16時点の`exit 127`は本番worktreeが古く`scripts/check-staging-health.sh`が無かったためで、同worktreeが`78dd2d3`へ更新されて解消した（Issue #162で追跡していた事象）。**2026-10-23 09:13に監視・バックアップ・鮮度検査・復元ドリルの4ユニットを独立ランタイムの`current`へ移行**し、4ジョブとも手動実行で成功した（[受入記録](staging-acceptance-2026-10-23.md) §4.2）。以降は本番デプロイに依存しない
 - [x] 記録: 各Human GateのY/N、実施時刻、結果をGitHub Issueへ記録した（Gate 1・2の実施内容は§3・§4と`state.json`へ記録済み。Gate 3〜7の実施記録は通知Issue #163・#164を証跡付きでclose済み。2026-10-23の独立リリース受入は[受入記録](staging-acceptance-2026-10-23.md)と`state.json`へ記録した）
 - [ ] `npm run test:e2e:staging`（Access Service TokenでStaging公開URLを認証してdesktop/mobileを検証）: **オーナー実施待ち**。テスト専用のService Tokenをローカルで作成し、テスト直後にpolicyとtokenの両方を削除する必要がある（値はGit・ログ・チャットへ出さない。§12参照）。2026-10-16・2026-10-23時点とも未実施（2026-10-23の受入E2Eは`--local`のみ）
 
