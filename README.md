@@ -86,7 +86,7 @@ GitHub正本は`mirai-construction-dx/Mirai-Web-CAD`です。2026-08-26に`Const
 | 版/承認 | 限定対応 | 下書き、レビュー提出、承認、承認済み版の直接変更禁止、新版作成は動作。API接続確認(`state.apiStatus.state === "ok"`)が取れている場合のみ操作を許可し、未接続時はサーバー権限を経由しないローカル完結を行わない(2026-08-29修正) |
 | 権限 | 限定対応 | 閲覧者、作図者、レビュアー、承認者、CAD管理者の主要操作制御は動作。ロール切替はAPI接続確認後にサーバー実効権限へロックされる。ロール解決はメール個別指定(`ACCESS_ROLE_MAP`)が最優先、次点でEntra IDグループ所属(`ENTRA_GROUP_ROLE_MAP`、非対話式Graph API、任意設定、2026-08-30〜)を参照する。ログインはCloudflareアカウントを使用する |
 | 保存 | 限定対応 | LocalStorage自動保存(平文)、JSON出力、デモ初期化。認証済みAPI接続時はローカルPostgreSQLへ同期(2026-08-30〜、Issue #22で移行完了) |
-| API | 限定対応 | `/api/health`、図面取得、Transaction、AI Run、承認、監査ログ、重複実行拒否を実装。本番はローカル常駐サーバー(`scripts/serve-production.mjs`)経由でCloudflare Tunnelから配信 |
+| API | 限定対応 | `/api/health`、`/api/integration/status`(連携準備状態・認証必須)、図面取得、Transaction、AI Run、承認、監査ログ、重複実行拒否を実装。本番はローカル常駐サーバー(`scripts/serve-production.mjs`)経由でCloudflare Tunnelから配信 |
 | 状態確認 | 限定対応 | 正常、空、Loading、Errorを画面内のState Reviewで切替 |
 | システム設定 | 限定対応 | 上部設定からグリッド表示、スナップ、間隔、コマンドログ行数をブラウザ単位で保存 |
 | DB | 限定対応 | ローカルPostgreSQL 16(このホスト常駐)へ接続し、図面、AI Run、監査、Idempotencyを永続化。2026-08-30にNeon PostgreSQLから移行完了(Issue #22) |
@@ -181,6 +181,11 @@ RESTORE_DATABASE_URL="postgresql://...empty-db" BACKUP_FILE="artifacts/cad.dump"
 - [Staging受入記録 2026-10-23](docs/runbooks/staging-acceptance-2026-10-23.md)
 - [Staging環境の設計(ADR-0005)](docs/adr/ADR-0005-staging-environment.md)
 - [Staging独立リリースの設計(ADR-0006)](docs/adr/ADR-0006-staging-independent-release-channel.md)
+- [Staging migrationリハーサル](docs/runbooks/staging-migration-rehearsal.md)
+- [Core release intake checker](docs/architecture/core-release-intake.md)
+- [MCIP/CDEアダプタ設計](docs/architecture/integration-adapters.md)
+- [MCP読み取りツール契約(ドラフト)](docs/architecture/mcp-tool-contract.md)
+- [統合ステータスAPI](docs/architecture/integration-status.md)
 - [API/DBメモ](docs/api-db.md)
 - [テスト方針](docs/testing.md)
 - [要件・設計トレーサビリティ](docs/mvp-traceability.md)

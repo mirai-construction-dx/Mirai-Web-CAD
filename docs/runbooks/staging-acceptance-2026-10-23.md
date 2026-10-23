@@ -5,7 +5,7 @@
 本記録は**事実の記録**であり、手順の正本は[Staging構築手順書](staging-bringup.md)と[Staging E2Eと公開境界の検証](staging-e2e.md)、日常運用は[ローカルデプロイ運用メモ](../deployment-local.md)です。値はcommit SHA・DB名・ポート・パスのみを記載し、**秘密値・資格情報・接続文字列・個人情報は記載しません**。
 
 > [!NOTE]
-> **最終更新: 2026-10-23 09:02 JST。** 受入後に本番・MVPへの反映（`scripts/deploy-local.sh`、別のHuman Gate）が完了したため、最終commit `dd4bddbbe13800a2db35d7602cfd3f8564304880` の実測を§2・§4.1・§5・§7へ追記しました。以降は「本番反映後」の値を最終状態として扱います。
+> **最終更新: 2026-10-23 10:30 JST。** 初回受入（08:45〜09:02、`625e7c3`→`dd4bddb`）に続き、同日10:28〜10:30 JSTに**第2リリース**（Dependabot更新・Core intake・Access E2Eラッパー・統合アダプタ・migrationリハーサル・統合ステータスAPI）を同じ手順で反映しました。最新の配信commitは`a23be49a498618a5500745beed30a8ae8e341b24`です（§4.3）。§2の「初回受入」の値は履歴として残し、最終状態は§4.3を正とします。
 
 ## 1. 目的
 
@@ -21,14 +21,18 @@
 | 受入実施日時 | 2026-10-23 08:45〜08:47 JST（Staging先行デプロイと受入） |
 | 本番反映実施日時 | 2026-10-23 09:01〜09:02 JST（`scripts/deploy-local.sh` 成功、§4.1） |
 | 対象commit（リリース候補） | `625e7c311ce42b11ab883103de113e61ce5cd32c`（PR #179: ADR-0006、`deploy-staging.sh`、unit分離） |
-| 本番反映の最終commit | `dd4bddbbe13800a2db35d7602cfd3f8564304880`（PR #180まで含むmain） |
+| 本番反映の最終commit（初回受入） | `dd4bddbbe13800a2db35d7602cfd3f8564304880`（PR #180まで含むmain） |
 | 本番/MVPの配信commit（受入時点・反映前） | `246b88a58946669de2a6a89b25de167531f4ac84` |
-| 本番/MVP/Stagingの配信commit（本番反映後・最終） | `dd4bddbbe13800a2db35d7602cfd3f8564304880` |
+| 本番/MVP/Stagingの配信commit（初回受入の本番反映後） | `dd4bddbbe13800a2db35d7602cfd3f8564304880` |
 | 本番worktreeのHEAD（受入時点） | `78dd2d3` |
-| 本番worktreeのHEAD（本番反映後） | `dd4bddbbe13800a2db35d7602cfd3f8564304880` |
+| 本番worktreeのHEAD（初回受入の本番反映後） | `dd4bddbbe13800a2db35d7602cfd3f8564304880` |
 | 本番worktreeの`dist`（受入時点） | `.releases/246b88a58946669de2a6a89b25de167531f4ac84/dist` |
-| 本番worktreeの`dist`（本番反映後） | `.releases/dd4bddbbe13800a2db35d7602cfd3f8564304880/dist` |
-| Stagingランタイム | `~/.local/share/mirai-web-cad/staging-runtime`（`current` → `releases/dd4bddbbe13800a2db35d7602cfd3f8564304880`。受入時点は`releases/625e7c311ce42b11ab883103de113e61ce5cd32c`） |
+| 本番worktreeの`dist`（初回受入の本番反映後） | `.releases/dd4bddbbe13800a2db35d7602cfd3f8564304880/dist` |
+| **第2リリース後の最終commit** | **`a23be49a498618a5500745beed30a8ae8e341b24`**（§4.3） |
+| **本番/MVP/Stagingの配信commit（最終）** | **`a23be49a498618a5500745beed30a8ae8e341b24`** |
+| **本番worktreeのHEAD（最終）** | **`a23be49a498618a5500745beed30a8ae8e341b24`** |
+| **本番worktreeの`dist`（最終）** | **`.releases/a23be49a498618a5500745beed30a8ae8e341b24/dist`** |
+| Stagingランタイム | `~/.local/share/mirai-web-cad/staging-runtime`（`current` → `releases/a23be49a498618a5500745beed30a8ae8e341b24`。初回受入時点は`releases/625e7c3...`、初回本番反映後は`releases/dd4bddb...`） |
 | Stagingサービス | `mirai-web-cad-staging.service`（`127.0.0.1:18814`） |
 | Staging公開URL | `https://mirai-web-cad-stg.mirai-dx-platform.com` |
 | StagingアプリDB | `mirai_web_cad_staging` |
@@ -92,7 +96,7 @@ Stagingでの受入が完了した後、本番・MVPへ反映しました。反�
 
 | # | 検証 | 実測値 | 判定 |
 | --- | --- | --- | --- |
-| 11 | 本番・MVPへの反映（`scripts/deploy-local.sh`） | 成功（出力 `デプロイ成功: dd4bddbbe138...`）。最終mainは`dd4bddbbe13800a2db35d7602cfd3f8564304880`（PR #180まで） | OK |
+| 11 | 本番・MVPへの反映（`scripts/deploy-local.sh`） | 成功（出力 `デプロイ成功: dd4bddbbe138...`）。初回受入時点のmainは`dd4bddbbe13800a2db35d7602cfd3f8564304880`（PR #180まで。第2リリースは§4.3） | OK |
 | 12 | 反映前バックアップ | `mirai-web-cad-20261023T000118Z.dump`（`backup-local ok`、manifest付き） | OK |
 | 13 | 本番worktree | HEAD `dd4bddb…`、`dist`と`node_modules` → `.releases/dd4bddb…/` | OK |
 | 14 | 3環境health（18812 / 18813 / 18814） | すべて`ok=true`、`db.mode=connected`、`deploy.commit=dd4bddb…`、`deploy.distCommit=dd4bddb…` | OK |
@@ -114,6 +118,25 @@ ADR-0006の残課題だった「監視・バックアップ・鮮度検査・復
 | 23 | 本番・MVPへの影響 | 本番/MVPのサービス・DB・worktreeは変更なし。`check-staging-readiness.sh`は5ユニットすべての`WorkingDirectory`を`[OK]`で確認 | OK |
 
 これにより、本番worktreeの更新状況にかかわらず、Stagingの定期ジョブはStagingのリリース（`current`）と同じ版のスクリプトを実行します。ユニットの旧版はホスト側にバックアップ済みです。
+
+### 4.3 第2リリース（Dependabot更新・連携準備、2026-10-23 10:28〜10:30 JST）
+
+初回受入後、Dependabotの更新（wrangler / Playwright / eslint / axe-core / Actions 2件）と連携準備のコード（Core intake checker、Access E2Eラッパー、MCIP/CDEアダプタ、MCP契約ドラフト、migrationリハーサル、統合ステータスAPI）をmainへマージし、同じ「Staging先行→受入→本番反映」の順序で反映しました。
+
+| # | 検証 | 実測値 | 判定 |
+| --- | --- | --- | --- |
+| 24 | 対象commit | `a23be49a498618a5500745beed30a8ae8e341b24`（PR #170/#171/#172/#173/#183/#184/#185/#186等を含むmain） | OK |
+| 25 | Staging先行デプロイ | 2026-10-23 10:28:30 JST、`deploy-staging.sh`成功。`current` → `releases/a23be49...`。この時点の本番/MVPは`dd4bddb`のまま | OK |
+| 26 | StagingローカルE2E | `E2E_EXPECT_COMMIT=a23be49...`でdesktop/mobile **2/2 pass**、`deployedCommit=a23be49...` | OK |
+| 27 | Staging readiness / 公開境界 | readiness全項目OK、Staging `/`・`/api/health`=302(Access)、本番`/api/health`=200、MVP `/`=302 | OK |
+| 28 | Access Service Tokenラッパー | `run-staging-access-e2e.sh --dry-run`でトークン未設定の実行計画を表示。秘密値の出力なし。**実トークン実行は未実施**（オーナー手動） | OK（dry-run） |
+| 29 | Core release intake | `check-core-release.mjs --tag v0.8.0` → **NO-GO**。SHA256は`SHA256SUMS`と一致するが、attestation 404・署名鍵`keys: []`。core-lockは未作成 | NO-GO（想定どおり） |
+| 30 | Staging migrationリハーサル | 実Staging DBで`db:verify`→`db:check`を実行し、`database verification ok: database=mirai_web_cad_staging tables=9 seed=1`、`db:check ok`（2026-10-23 09:56〜10:00 JST） | OK |
+| 31 | 本番・MVPへの反映 | `deploy-local.sh`成功（`デプロイ成功: a23be49...`）。事前backup=`mirai-web-cad-20261023T013012Z.dump`（`backup-local ok`、manifest付き） | OK |
+| 32 | Stagingが本番デプロイで再起動されていないこと | `mirai-web-cad-staging.service`の`ActiveEnterTimestamp`はStaging先行デプロイ時の`2026-10-23 10:28:30 JST`のまま（本番デプロイは10:30台） | OK |
+| 33 | 3環境health（最終） | 18812/18813/18814すべて`ok=true`、`db.mode=connected`、`deploy.commit=deploy.distCommit=a23be49...` | OK |
+
+第2リリースでは、初回受入で確立した分離（独立ランタイム・別DB・Stagingのみ先行デプロイ・本番デプロイがStagingを再起動しない）が維持されることを再確認しました。Core成果物は署名・attestationが無いため、引き続き取り込みません（[Core Issue #98](https://github.com/mirai-construction-dx/Mirai-Harness-Core/issues/98)）。
 
 ## 5. Stagingと本番/MVPの分離証明
 
@@ -165,13 +188,13 @@ ADR-0006の残課題だった「監視・バックアップ・鮮度検査・復
 
 ## 7. 残課題
 
-本番反映は2026-10-23 09:01〜09:02 JSTに完了しました（§4.1、最終commit `dd4bddb`）。定期ジョブの独立ランタイム化（§4.2）も完了しており、残課題は次の1点です。
+本番反映は初回（2026-10-23 09:01〜09:02 JST、`dd4bddb`）と第2リリース（同日10:28〜10:30 JST、`a23be49`）の2回完了しました（§4.1・§4.3）。定期ジョブの独立ランタイム化（§4.2）も完了しており、残課題は次の1点です。
 
 | # | 残課題 | 現状と次アクション |
 | --- | --- | --- |
-| 1 | **Service Tokenを使う公開URL E2Eが未実施** | 今回のE2Eは`--local`（トークン不要）のみ。公開URLの画面検証（`npm run test:e2e:staging`、Access Service Token）はトークン値がログに残らないようオーナーがローカルで実施する必要があり、**2026-10-23時点でも未実施**（[staging-e2e.md](staging-e2e.md) §3、[staging-bringup.md](staging-bringup.md) §12） |
+| 1 | **Service Tokenを使う公開URL E2Eが未実施** | 今回のE2Eは`--local`（トークン不要）のみ。PR #183で`scripts/run-staging-access-e2e.sh`（トークン非出力・`--dry-run`・境界の前後確認）を追加し、dry-runは確認済み。**実トークンでの実行は未実施**で、トークン値がログに残らないようオーナーが手動発行→実行→直後にtoken/policy削除を行う（[staging-e2e.md](staging-e2e.md) §3.1、[staging-bringup.md](staging-bringup.md) §12） |
 
-次回以降のリリースでも「Staging先行デプロイ→受入→本番反映」の順序を守ります。今回は受入（08:45〜08:47、`625e7c3`）の後にmainが`dd4bddb`（PR #180まで）へ進んだため、Stagingへ`dd4bddb`を先行デプロイしてから本番・MVPへ反映しました（§4.1）。
+次回以降のリリースでも「Staging先行デプロイ→受入→本番反映」の順序を守ります。今回は初回受入（08:45〜08:47、`625e7c3`）の後にmainが`dd4bddb`へ進んだためStagingへ先行デプロイしてから本番へ反映し（§4.1）、第2リリースでは`a23be49`を同じ順序で反映しました（§4.3）。
 
 ## 8. 参照文書
 
