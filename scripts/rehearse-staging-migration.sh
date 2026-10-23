@@ -78,6 +78,17 @@ health_field() {
     | sed -E 's/^[^:]+:[[:space:]]*//; s/^"//; s/"$//' || true
 }
 
+# healthのdb.modeだけを取り出す。単純な`health_field mode`ではauth.mode(access)を
+# 先に拾ってしまうため、dbオブジェクトの中のmodeに限定する。
+db_mode_field() {
+  local body="$1"
+  # healthは整形済みJSON(複数行)なので、改行を除いてからdbオブジェクト内のmodeを探す。
+  printf '%s' "$body" \
+    | tr -d '\n' \
+    | sed -n 's/.*"db"[[:space:]]*:[[:space:]]*{[^}]*"mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -n 1
+}
+
 # Stagingのhealthを確認し、秘密を含まない要約だけを表示する。
 # health本文には(匿名healthでは)利用者情報も含まれ得るため、本文は表示しない。
 health_summary() {
@@ -89,7 +100,7 @@ health_summary() {
   fi
   ok="$(health_field ok "$body")"
   dist="$(health_field distCommit "$body")"
-  db_mode="$(health_field mode "$body")"
+  db_mode="$(db_mode_field "$body")"
   echo "[health:${phase}] ok=${ok:-unknown} distCommit=${dist:-unknown} db.mode=${db_mode:-unknown}"
   [[ "$ok" == "true" ]]
 }
