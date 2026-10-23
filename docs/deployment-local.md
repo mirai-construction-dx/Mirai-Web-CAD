@@ -420,5 +420,5 @@ curl -sI https://mirai-web-cad.mirai-dx-platform.com/src/app.js | grep -i "cache
 - `mirai-web-cad.service`のsystemdユニットは`IPAddressDeny=any`を採用していない(Cloudflare Access JWKS取得の外向きHTTPSに必要なため)。インバウンド制限は`127.0.0.1`バインドと`RestrictAddressFamilies`で担保している
 - CI(GitHub Actions)からはこのホストへ直接デプロイできないため、デプロイは`scripts/deploy-local.sh`(本番・MVP)と`scripts/deploy-staging.sh`(Staging)の手動実行に依存する。self-hosted runner化は将来の別Issueとする
 - Stagingは独立ランタイム(`~/.local/share/mirai-web-cad/staging-runtime`)を持つため、本番・MVPの`.releases/`とは世代管理が別になる。Stagingのディスク使用量は`releases/`直近3件+ロールバック先に制限される
-- `mirai-web-cad-staging-monitor.service`などのStaging定期ジョブは本番ツリーのスクリプトを実行するため、監視スクリプトの更新は本番デプロイ後(またはユニットの`WorkingDirectory`変更後)に反映される。Staging本体の独立リリースとは反映タイミングが異なる
+- `mirai-web-cad-staging-monitor.service`などのStaging定期ジョブも、独立ランタイムの`current`にあるスクリプトを実行する（2026-10-23移行）。本番デプロイの有無にかかわらず、Stagingのリリースと同じ版のスクリプトが使われる。定期ジョブだけを旧版へ戻す場合は`current`を切り替えるか、ユニットの`WorkingDirectory`を一時的に変更する
 - バックアップのオフサイト転送(R2等)は未実施。保存先・暗号鍵・保持期間・費用・復元責任者の合意が別途必要
