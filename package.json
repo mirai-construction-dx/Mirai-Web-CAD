@@ -50,6 +50,6 @@
     "eslint": "^10.13.0",
     "hcl2-parser": "^1.0.3",
     "typescript": "^7.0.2",
-    "wrangler": "^4.152.0"
+    "wrangler": "^4.154.0"
   }
 }
