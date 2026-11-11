@@ -41,7 +41,7 @@
   "dependencies": {
     "dxf-parser": "1.1.2",
     "jose": "^6.2.13",
-    "postgres": "^3.4.9"
+    "postgres": "^4.1.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
